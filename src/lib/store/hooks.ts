@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import { computeAvailability, type TaskAvailability } from "@/lib/graph/availability";
 import { buildTaskGraph } from "@/lib/graph/task-graph";
-import { deriveTaskStates, type TaskState } from "@/lib/logs/progress";
+import { deriveTaskStates, summarize, type TaskState } from "@/lib/logs/progress";
 import type { ProfileGeneration } from "@/lib/logs/wipe";
 import { denormalize } from "@/lib/tarkovdev/client";
 import { resolveMap } from "@/lib/tarkovdev/maps";
@@ -128,27 +128,27 @@ export function useRaidActive(): boolean {
   return useMemo(() => isRaidActive(raid), [raid]);
 }
 
-/** Counts for the overview board. */
+/**
+ * Counts for the overview board.
+ *
+ * Restricted to tasks the loaded dataset contains, so these agree with the task list.
+ * Completions of quests tarkov.dev no longer publishes are reported as `unmatched`
+ * instead of quietly inflating the total past what the list can show.
+ */
 export function useProgressCounts() {
   const states = useTaskStates();
   const availability = useAvailability();
-  const total = useTasks().length;
+  const tasks = useTasks();
 
   return useMemo(() => {
-    let finished = 0;
-    let started = 0;
-    let manual = 0;
-    for (const state of states.values()) {
-      if (state.status === "finished") finished += 1;
-      if (state.status === "started") started += 1;
-      if (state.origin === "manual") manual += 1;
-    }
+    const known = new Set(tasks.map((task) => task.id));
+    const { finished, started, manual, unmatched } = summarize(states, known);
     let available = 0;
     let locked = 0;
     for (const entry of availability.values()) {
       if (entry.status === "available") available += 1;
       if (entry.status === "locked") locked += 1;
     }
-    return { finished, started, manual, available, locked, total };
-  }, [states, availability, total]);
+    return { finished, started, manual, unmatched, available, locked, total: tasks.length };
+  }, [states, availability, tasks]);
 }

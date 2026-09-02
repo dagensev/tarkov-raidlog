@@ -8,9 +8,14 @@ import type { Task } from "@/lib/tarkovdev/types";
 import { useAppStore } from "@/lib/store/app-store";
 import { Pill, cx } from "./ui";
 
+/**
+ * Labels here must match the filter tabs on the tasks page exactly. They did not: a
+ * started task was pilled "Active" while the "Active" tab meant started *and* ready, so
+ * the same word named two different sets.
+ */
 const STATUS_STYLE = {
   finished: { rail: "bg-moss", label: "Done", tone: "moss" },
-  started: { rail: "bg-amber", label: "Active", tone: "amber" },
+  started: { rail: "bg-amber", label: "In progress", tone: "amber" },
   available: { rail: "bg-bone-dim", label: "Ready", tone: "muted" },
   locked: { rail: "bg-line-bright", label: "Locked", tone: "muted" },
   failed: { rail: "bg-rust", label: "Failed", tone: "rust" },

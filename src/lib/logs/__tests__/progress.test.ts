@@ -90,7 +90,30 @@ describe("summarize", () => {
       [task(TASK_A, "finished", 1_000), task(TASK_B, "started", 1_000)],
       { manual: { zzz: "failed" } },
     );
-    expect(summarize(states)).toEqual({ finished: 1, started: 1, failed: 1, manual: 1 });
+    expect(summarize(states)).toEqual({
+      finished: 1,
+      started: 1,
+      failed: 1,
+      manual: 1,
+      unmatched: 0,
+    });
     expect(taskIdsWithStatus(states, "finished")).toEqual([TASK_A]);
+  });
+
+  it("separates completions the task list does not contain", () => {
+    // Real logs turn these up: quests finished during a wipe that tarkov.dev no longer
+    // publishes. Counting them in would make the overview disagree with the task list.
+    const states = deriveTaskStates([
+      task(TASK_A, "finished", 1_000),
+      task("616051e63f96cc089c1cf37f", "finished", 1_000),
+    ]);
+    const known = new Set([TASK_A]);
+    expect(summarize(states, known)).toMatchObject({ finished: 1, unmatched: 1 });
+  });
+
+  it("counts everything when the task list has not loaded", () => {
+    // An empty set means "we do not know yet", not "nothing is known".
+    const states = deriveTaskStates([task(TASK_A, "finished", 1_000)]);
+    expect(summarize(states, new Set())).toMatchObject({ finished: 1, unmatched: 0 });
   });
 });

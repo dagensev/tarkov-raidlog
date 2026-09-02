@@ -39,7 +39,7 @@ function RaidBanner() {
 }
 
 function ProgressBoard() {
-  const { finished, started, manual, available, locked, total } = useProgressCounts();
+  const { finished, started, manual, unmatched, available, locked, total } = useProgressCounts();
   const pct = total > 0 ? Math.round((finished / total) * 100) : 0;
 
   return (
@@ -79,6 +79,12 @@ function ProgressBoard() {
         {manual > 0 ? (
           <p className="data mt-2 text-[10px] text-muted">
             {manual} set by hand, the rest read from your logs
+          </p>
+        ) : null}
+        {unmatched > 0 ? (
+          <p className="data mt-2 text-[10px] text-muted">
+            {unmatched} more completed in your logs are not in this mode&rsquo;s task list — event
+            quests, or ones since removed from the game
           </p>
         ) : null}
       </div>

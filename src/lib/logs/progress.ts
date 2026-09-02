@@ -90,11 +90,39 @@ export interface ProgressSummary {
   failed: number;
   /** How many states came from a manual override rather than the logs. */
   manual: number;
+  /**
+   * Tasks the logs record but the current task list does not contain.
+   *
+   * Real logs turn these up: quests completed during a wipe that tarkov.dev no longer
+   * publishes, because they were event-only or removed in a patch. They are counted
+   * apart rather than folded in, so this summary agrees with a task list that cannot
+   * show them.
+   */
+  unmatched: number;
 }
 
-export function summarize(states: ReadonlyMap<string, TaskState>): ProgressSummary {
-  const summary: ProgressSummary = { finished: 0, started: 0, failed: 0, manual: 0 };
+/**
+ * Count states by status.
+ *
+ * Pass `knownTaskIds` to restrict the counts to tasks the loaded dataset actually has;
+ * anything else lands in `unmatched`. Without it, everything is counted.
+ */
+export function summarize(
+  states: ReadonlyMap<string, TaskState>,
+  knownTaskIds?: ReadonlySet<string>,
+): ProgressSummary {
+  const summary: ProgressSummary = {
+    finished: 0,
+    started: 0,
+    failed: 0,
+    manual: 0,
+    unmatched: 0,
+  };
   for (const state of states.values()) {
+    if (knownTaskIds && knownTaskIds.size > 0 && !knownTaskIds.has(state.taskId)) {
+      summary.unmatched += 1;
+      continue;
+    }
     summary[state.status] += 1;
     if (state.origin === "manual") summary.manual += 1;
   }

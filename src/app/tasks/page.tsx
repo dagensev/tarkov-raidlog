@@ -6,15 +6,19 @@ import { TaskRow } from "@/components/task-row";
 import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
 import { useAvailability, useMaps, useTaskStates, useTasks } from "@/lib/store/hooks";
 
-type Filter = "active" | "available" | "started" | "finished" | "locked" | "all";
+type Filter = "todo" | "available" | "started" | "finished" | "locked" | "all";
 
-const FILTERS: Array<{ id: Filter; label: string }> = [
-  { id: "active", label: "Active" },
-  { id: "available", label: "Ready" },
-  { id: "started", label: "In progress" },
-  { id: "finished", label: "Done" },
-  { id: "locked", label: "Locked" },
-  { id: "all", label: "All" },
+/**
+ * `todo` is the union of ready and in-progress — everything you could act on. It is
+ * named separately from both so no label describes two different sets.
+ */
+const FILTERS: Array<{ id: Filter; label: string; title: string }> = [
+  { id: "todo", label: "To do", title: "Ready to pick up, plus what you are already holding" },
+  { id: "available", label: "Ready", title: "Nothing is blocking these — go pick them up" },
+  { id: "started", label: "In progress", title: "Already accepted, not yet handed in" },
+  { id: "finished", label: "Done", title: "Completed this wipe" },
+  { id: "locked", label: "Locked", title: "Something is unmet — open a task to see what" },
+  { id: "all", label: "All", title: "Every task in the game" },
 ];
 
 export default function TasksPage() {
@@ -23,17 +27,24 @@ export default function TasksPage() {
   const availability = useAvailability();
   const maps = useMaps();
 
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useState<Filter>("todo");
   const [query, setQuery] = useState("");
   const [mapId, setMapId] = useState<string>("");
   const [kappaOnly, setKappaOnly] = useState(false);
 
-  const counts = useMemo(() => {
-    const tally: Record<string, number> = { available: 0, started: 0, finished: 0, locked: 0 };
+  const counts = useMemo<Record<Filter, number>>(() => {
+    const tally = { available: 0, started: 0, finished: 0, locked: 0, failed: 0 };
     for (const entry of availability.values()) {
-      if (entry.status in tally) tally[entry.status] += 1;
+      if (entry.status in tally) tally[entry.status as keyof typeof tally] += 1;
     }
-    return tally;
+    return {
+      available: tally.available,
+      started: tally.started,
+      finished: tally.finished,
+      locked: tally.locked,
+      todo: tally.available + tally.started,
+      all: availability.size,
+    };
   }, [availability]);
 
   const visible = useMemo(() => {
@@ -41,8 +52,8 @@ export default function TasksPage() {
     return tasks
       .filter((task) => {
         const status = availability.get(task.id)?.status ?? "available";
-        if (filter === "active" && status !== "available" && status !== "started") return false;
-        if (filter !== "active" && filter !== "all" && status !== filter) return false;
+        if (filter === "todo" && status !== "available" && status !== "started") return false;
+        if (filter !== "todo" && filter !== "all" && status !== filter) return false;
         if (kappaOnly && !task.kappaRequired) return false;
         if (mapId) {
           const onMap =
@@ -89,6 +100,7 @@ export default function TasksPage() {
             <button
               key={option.id}
               type="button"
+              title={option.title}
               onClick={() => setFilter(option.id)}
               className={cx(
                 "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
@@ -98,9 +110,7 @@ export default function TasksPage() {
               )}
             >
               {option.label}
-              {option.id in counts ? (
-                <span className="data ml-2 text-[10px] opacity-60">{counts[option.id]}</span>
-              ) : null}
+              <span className="data ml-2 text-[10px] opacity-60">{counts[option.id]}</span>
             </button>
           ))}
 
