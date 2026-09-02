@@ -1,7 +1,16 @@
 import { TARKOV_DATA_QUERY } from "./query";
 import type { TarkovData } from "./types";
 
-export const TARKOV_DEV_ENDPOINT = "https://api.tarkov.dev/graphql";
+/**
+ * Where game data comes from.
+ *
+ * tarkov.dev is called straight from the browser, which is what TarkovTracker does and
+ * what keeps hosting free. If their CORS policy ever stops allowing this origin, set
+ * NEXT_PUBLIC_TARKOV_ENDPOINT to a same-origin Worker route that proxies it -- no call
+ * site changes.
+ */
+export const TARKOV_DEV_ENDPOINT =
+  process.env.NEXT_PUBLIC_TARKOV_ENDPOINT ?? "https://api.tarkov.dev/graphql";
 
 /** Thrown when the API answers but the answer is not usable. */
 export class TarkovDevError extends Error {

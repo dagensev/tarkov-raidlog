@@ -1,26 +1,185 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Tarkov Raidlog — "field terminal".
+ *
+ * Committed single dark theme, not a light/dark pair. This gets read on a second monitor
+ * in a dark room while the game has the primary display, so a light mode would be a
+ * flashbang. Density is deliberate: mid-raid you want to scan, not scroll.
+ */
+
+@theme {
+  --color-ground: #0d0f0a;
+  --color-ground-2: #14170f;
+  --color-panel: #191d13;
+  --color-panel-2: #1f2418;
+  --color-line: #2b3220;
+  --color-line-bright: #414b32;
+
+  --color-bone: #ddd8c6;
+  --color-bone-dim: #8f9080;
+  --color-muted: #6b6d5e;
+
+  --color-amber: #e9a63c;
+  --color-amber-dim: #a8752a;
+  --color-moss: #86a063;
+  --color-rust: #c25c34;
+  --color-steel: #7593a6;
+
+  --font-display: var(--font-chakra), "Arial Narrow", sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-ground);
+  color: var(--color-bone);
+  font-family: var(--font-display);
+  font-feature-settings: "tnum" 1;
+  /* Faint diagonal weave plus a vignette: gives the ground a surface instead of a void. */
+  background-image:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.012) 0px,
+      rgba(255, 255, 255, 0.012) 1px,
+      transparent 1px,
+      transparent 7px
+    ),
+    radial-gradient(ellipse 120% 90% at 50% -10%, rgba(233, 166, 60, 0.05), transparent 60%);
+}
+
+/* Film grain, fixed so it does not swim while scrolling. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.16;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+@layer utilities {
+  /* Stencilled section label: the tag on a crate. */
+  .stencil {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+
+  .data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Corner brackets, the language of a targeting reticle. Drawn on a wrapper so the
+     panel keeps its own border. */
+  .bracket {
+    position: relative;
+  }
+  .bracket::before,
+  .bracket::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-color: var(--color-amber-dim);
+    pointer-events: none;
+  }
+  .bracket::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .bracket::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  /* Tick strip used under headers, like a ruler edge. */
+  .ticks {
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--color-line-bright) 0px,
+      var(--color-line-bright) 1px,
+      transparent 1px,
+      transparent 6px
+    );
+  }
+
+  .glow-amber {
+    text-shadow: 0 0 14px rgba(233, 166, 60, 0.45);
+  }
+}
+
+/* Scrollbars that belong to the machine. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-bright) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-bright);
+  border: 3px solid var(--color-ground);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-amber-dim);
+}
+
+::selection {
+  background: var(--color-amber);
+  color: var(--color-ground);
+}
+
+:focus-visible {
+  outline: 1px solid var(--color-amber);
+  outline-offset: 2px;
+}
+
+/* One orchestrated entrance on load; staggered by the caller. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@layer utilities {
+  .rise {
+    animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+  .live-dot {
+    animation: pulse-dot 1.8s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .live-dot {
+    animation: none;
+  }
 }

@@ -23,3 +23,13 @@ interface DirectoryPickerOptions {
 interface Window {
   showDirectoryPicker?(options?: DirectoryPickerOptions): Promise<FileSystemDirectoryHandle>;
 }
+
+/**
+ * Async iteration over a directory. Part of the spec, absent from lib.dom in this
+ * TypeScript version.
+ */
+interface FileSystemDirectoryHandle {
+  values(): AsyncIterableIterator<FileSystemHandle>;
+  keys(): AsyncIterableIterator<string>;
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+}
