@@ -26,8 +26,15 @@ export interface ScanResult {
 }
 
 interface FileCursor {
+  /** Byte offset, matching what the filesystem reports for size. */
   offset: number;
   parser: LogParser;
+  /**
+   * Kept alive across polls so a UTF-8 sequence split between two reads is decoded
+   * correctly rather than turning into a replacement character. Logs contain Cyrillic
+   * player nicknames, so this is not hypothetical.
+   */
+  decoder: TextDecoder;
 }
 
 export class LogWatcher {
@@ -68,23 +75,25 @@ export class LogWatcher {
       const stat = await this.source.stat(folder, file);
       if (!stat) continue;
 
+      const fresh = (): FileCursor => ({
+        offset: 0,
+        parser: new LogParser({ folder, source: getLogType(file) }),
+        decoder: new TextDecoder("utf-8"),
+      });
+
       let cursor = this.cursors.get(key);
-      if (!cursor) {
-        cursor = { offset: 0, parser: new LogParser({ folder, source: getLogType(file) }) };
-        this.cursors.set(key, cursor);
-      }
+      if (!cursor) this.cursors.set(key, (cursor = fresh()));
 
       // A shrinking file means the game rotated or truncated it; start over rather than
       // reading from an offset that now points into the middle of a different record.
       if (stat.size < cursor.offset) {
-        cursor.offset = 0;
-        cursor.parser = new LogParser({ folder, source: getLogType(file) });
+        this.cursors.set(key, (cursor = fresh()));
       }
 
       if (stat.size > cursor.offset) {
-        const chunk = await this.source.readFrom(folder, file, cursor.offset);
-        cursor.offset += chunk.length;
-        events.push(...cursor.parser.push(chunk));
+        const bytes = await this.source.readFrom(folder, file, cursor.offset);
+        cursor.offset += bytes.byteLength;
+        events.push(...cursor.parser.push(cursor.decoder.decode(bytes, { stream: true })));
       }
       if (final) events.push(...cursor.parser.flush());
     }

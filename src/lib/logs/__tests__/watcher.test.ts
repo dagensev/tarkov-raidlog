@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { TaskEvent } from "../events";
+import type { GroupMemberEvent, TaskEvent } from "../events";
 import { MemoryLogSource } from "../source";
 import { LogWatcher } from "../watcher";
-import { USER_CONFIRMED, TASK_FINISHED, APP_LINES_V11 } from "./fixtures";
+import {
+  APP_LINES_V11,
+  GROUP_INVITE_ACCEPT,
+  TASK_FINISHED,
+  USER_CONFIRMED,
+} from "./fixtures";
 
 const NEW = "log_2026.09.01_19-27-07_1.1.0.1.46911";
 const OLD = "log_2025.11.15_13-01-25_1.0.0.0.41760";
@@ -60,6 +65,43 @@ describe("LogWatcher", () => {
     const events = await watcher.poll();
     expect(events).toHaveLength(1);
     expect((events[0] as TaskEvent).taskId).toBe("657315ddab5a49b71f098853");
+  });
+
+  it("keeps byte offsets aligned when the log contains non-ASCII text", async () => {
+    // Real group notifications carry Cyrillic nicknames. Tracking the offset in
+    // characters would drift behind the byte length the filesystem reports and start
+    // slicing mid-record.
+    const cyrillic = GROUP_INVITE_ACCEPT.replace("Squadmate", "Макс Калган");
+    const source = new MemoryLogSource({ [NEW]: { [NOTIF]: `${cyrillic}\n` } });
+    const watcher = new LogWatcher(source);
+
+    const first = await watcher.poll();
+    expect(first).toHaveLength(1);
+    expect((first[0] as GroupMemberEvent).nickname).toBe("Макс Калган");
+
+    // The next append must land exactly where the previous read stopped.
+    source.append(NEW, NOTIF, `${TASK_FINISHED}\n`);
+    const second = await watcher.poll();
+    expect(second).toHaveLength(1);
+    expect((second[0] as TaskEvent).taskId).toBe("657315ddab5a49b71f098853");
+  });
+
+  it("decodes a multi-byte character split across two polls", async () => {
+    const cyrillic = GROUP_INVITE_ACCEPT.replace("Squadmate", "Макс");
+    const bytes = new TextEncoder().encode(`${cyrillic}\n`);
+    // Cut the file after the first byte of a two-byte Cyrillic letter, which is what a
+    // poll landing mid-write actually sees.
+    const splitAt = bytes.indexOf(0xd0) + 1;
+    const source = new MemoryLogSource();
+    source.writeBytes(NEW, NOTIF, bytes.subarray(0, splitAt));
+
+    const watcher = new LogWatcher(source);
+    await watcher.poll();
+    source.writeBytes(NEW, NOTIF, bytes);
+    const events = await watcher.poll();
+
+    const member = events.find((e) => e.kind === "group-member") as GroupMemberEvent | undefined;
+    expect(member?.nickname).toBe("Макс");
   });
 
   it("tails only the newest folder", async () => {

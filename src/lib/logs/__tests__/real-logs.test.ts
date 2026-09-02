@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-import { getLogType, isWatchedLogFile, sortLogFolders, type LogFolderInfo } from "../log-types";
-import { LogParser } from "../parse-line";
+import type { LogFolderInfo } from "../log-types";
+import type { FileStat, LogSource } from "../source";
+import { LogWatcher } from "../watcher";
 import { deriveTaskStates } from "../progress";
 import { analyzeWipes, type FolderObservation } from "../wipe";
 import type { LogEvent } from "../events";
@@ -27,40 +28,50 @@ interface ScanResult {
   folders: LogFolderInfo[];
 }
 
-function scan(): ScanResult {
-  const folders = sortLogFolders(readdirSync(LOGS_DIR));
-  const events: LogEvent[] = [];
-  const observations: FolderObservation[] = [];
+/**
+ * A {@link LogSource} over node's fs, so this exercises the real `LogWatcher` path —
+ * offsets, streaming decode and all — rather than only the parser.
+ */
+class NodeLogSource implements LogSource {
+  constructor(private readonly root: string) {}
 
-  for (const folder of folders) {
-    const dir = join(LOGS_DIR, folder.name);
-    const profileIds = new Set<string>();
-    const sessionModes = new Set<string>();
-
-    for (const file of readdirSync(dir)) {
-      if (!isWatchedLogFile(file)) continue;
-      const parser = new LogParser({ folder: folder.name, source: getLogType(file) });
-      const text = readFileSync(join(dir, file), "utf8");
-      for (const event of [...parser.push(text), ...parser.flush()]) {
-        events.push(event);
-        if (event.kind === "profile") profileIds.add(event.profileId);
-        if (event.kind === "raid-starting" && event.profileId) profileIds.add(event.profileId);
-        if (event.kind === "session-mode") sessionModes.add(event.mode);
-      }
-    }
-
-    observations.push({
-      folder,
-      profileIds: [...profileIds],
-      sessionModes: [...sessionModes],
-    });
+  async listFolders(): Promise<string[]> {
+    return readdirSync(this.root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
   }
 
-  return { events, observations, folders };
+  async listFiles(folder: string): Promise<string[]> {
+    return readdirSync(join(this.root, folder));
+  }
+
+  async stat(folder: string, file: string): Promise<FileStat | null> {
+    try {
+      const s = statSync(join(this.root, folder, file));
+      return { size: s.size, lastModified: s.mtimeMs };
+    } catch {
+      return null;
+    }
+  }
+
+  async readFrom(folder: string, file: string, start: number): Promise<Uint8Array> {
+    const buf = readFileSync(join(this.root, folder, file));
+    return new Uint8Array(buf.buffer, buf.byteOffset + start, Math.max(0, buf.byteLength - start));
+  }
+}
+
+async function scan(): Promise<ScanResult> {
+  const watcher = new LogWatcher(new NodeLogSource(LOGS_DIR));
+  const { events, observations } = await watcher.scanAll();
+  return { events, observations, folders: await watcher.folders() };
 }
 
 describe.skipIf(!hasLogs)("real Escape from Tarkov logs", () => {
-  const result = hasLogs ? scan() : null!;
+  let result: ScanResult;
+
+  beforeAll(async () => {
+    result = await scan();
+  });
 
   it("parses every session folder without throwing", () => {
     expect(result.folders.length).toBeGreaterThan(0);
