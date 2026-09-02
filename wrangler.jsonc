@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tarkov-raidlog",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The Next.js static export. Requests that match a file here are served straight from
+  // Cloudflare's edge: free, unlimited, and they never invoke the Worker.
+  "assets": {
+    "directory": "out",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page"
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "SQUAD_ROOM", "class_name": "SquadRoom" }]
+  },
+
+  // SQLite-backed, which is the only kind available on the Workers free plan -- and the
+  // kind we want anyway, for the relational storage and per-object 10 GB limit.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SquadRoom"] }],
+
+  "observability": { "enabled": true }
+}
