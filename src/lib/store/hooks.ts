@@ -7,7 +7,7 @@ import { buildTaskGraph } from "@/lib/graph/task-graph";
 import { deriveTaskStates, summarize, type TaskState } from "@/lib/logs/progress";
 import type { ProfileGeneration } from "@/lib/logs/wipe";
 import { denormalize } from "@/lib/tarkovdev/client";
-import { resolveMap } from "@/lib/tarkovdev/maps";
+import { mapsWithTasks, resolveMap } from "@/lib/tarkovdev/maps";
 import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
 import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
 
@@ -44,6 +44,18 @@ export function useTasks(): Task[] {
 
 export function useMaps(): GameMap[] {
   return useTarkovData()?.maps ?? EMPTY_MAPS;
+}
+
+/**
+ * Maps worth offering in a picker — those with at least one task assigned to them.
+ *
+ * Detection can still resolve to a map outside this list; it only narrows what is worth
+ * choosing by hand.
+ */
+export function useMapsWithTasks(): GameMap[] {
+  const maps = useMaps();
+  const tasks = useTasks();
+  return useMemo(() => mapsWithTasks(maps, tasks), [maps, tasks]);
 }
 
 /** The game mode in effect: manual choice, else the logs' `Session mode:`, else default. */

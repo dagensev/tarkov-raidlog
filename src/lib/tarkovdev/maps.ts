@@ -1,4 +1,4 @@
-import type { GameMap } from "./types";
+import type { GameMap, Task } from "./types";
 
 /**
  * Turning what the game logs into a tarkov.dev map.
@@ -71,4 +71,41 @@ export function isKnownScene(maps: readonly GameMap[], scene: string): boolean {
 /** Link to the map on tarkov.dev, using the slug the API supplies. */
 export function tarkovDevMapUrl(map: GameMap): string {
   return `https://tarkov.dev/map/${map.normalizedName}`;
+}
+
+/**
+ * Is this task worth showing when filtered to this map?
+ *
+ * Shared by the map picker and the filter itself so the two cannot drift apart and offer
+ * a map that then matches nothing.
+ */
+export function taskIsOnMap(task: Task, mapId: string): boolean {
+  return (
+    task.map?.id === mapId ||
+    task.objectives.some((objective) => objective.maps.some((m) => m.id === mapId)) ||
+    task.neededKeys.some((group) => group.map?.id === mapId)
+  );
+}
+
+/**
+ * Maps worth offering in a picker: those with at least one task assigned to them.
+ *
+ * Assignment means `task.map`, not merely an objective mentioning the map. That
+ * distinction is what removes the level-bracket variants — Ground Zero 21+ and Ground
+ * Zero Tutorial are the same physical location as Ground Zero, and objectives there are
+ * tagged with all three, so counting objective mentions would list the same map three
+ * times. Same for The Lab (Dark), and Terminal has no tasks at all.
+ *
+ * Verified against live data: hiding those four leaves every task still reachable through
+ * a map that remains.
+ */
+export function mapsWithTasks(
+  maps: readonly GameMap[],
+  tasks: readonly Task[],
+): GameMap[] {
+  const assigned = new Set<string>();
+  for (const task of tasks) {
+    if (task.map?.id) assigned.add(task.map.id);
+  }
+  return maps.filter((map) => assigned.has(map.id));
 }

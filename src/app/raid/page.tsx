@@ -8,12 +8,12 @@ import { useAppStore } from "@/lib/store/app-store";
 import {
   useAvailability,
   useCurrentMap,
-  useMaps,
+  useMapsWithTasks,
   useRaidActive,
   useTaskStates,
   useTasks,
 } from "@/lib/store/hooks";
-import { tarkovDevMapUrl } from "@/lib/tarkovdev/maps";
+import { tarkovDevMapUrl, taskIsOnMap } from "@/lib/tarkovdev/maps";
 
 /**
  * The raid board.
@@ -23,7 +23,7 @@ import { tarkovDevMapUrl } from "@/lib/tarkovdev/maps";
  */
 
 function MapPicker() {
-  const maps = useMaps();
+  const maps = useMapsWithTasks();
   const override = useAppStore((s) => s.settings.mapOverride);
   const update = useAppStore((s) => s.updateSettings);
   const scene = useAppStore((s) => s.raid.scene);
@@ -60,11 +60,7 @@ export default function RaidPage() {
     if (!map) return [];
     return tasks.filter((task) => {
       if (rowStatus(states.get(task.id)) === "finished") return false;
-      return (
-        task.map?.id === map.id ||
-        task.objectives.some((o) => o.maps.some((m) => m.id === map.id)) ||
-        task.neededKeys.some((k) => k.map?.id === map.id)
-      );
+      return taskIsOnMap(task, map.id);
     });
   }, [tasks, states, map]);
 

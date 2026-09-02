@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { isKnownScene, resolveMap, sceneKey, tarkovDevMapUrl } from "../maps";
-import type { GameMap } from "../types";
+import {
+  isKnownScene,
+  mapsWithTasks,
+  resolveMap,
+  sceneKey,
+  tarkovDevMapUrl,
+  taskIsOnMap,
+} from "../maps";
+import type { GameMap, Task } from "../types";
 
 /**
  * Map fixtures use the real `nameId` and `scenePath` values published by
@@ -134,5 +141,109 @@ describe("tarkovDevMapUrl", () => {
   it("uses the slug the API supplies", () => {
     expect(tarkovDevMapUrl(MAPS[10])).toBe("https://tarkov.dev/map/streets-of-tarkov");
     expect(tarkovDevMapUrl(MAPS[8])).toBe("https://tarkov.dev/map/ground-zero-21");
+  });
+});
+
+describe("mapsWithTasks", () => {
+  const task = (id: string, mapId: string | null, objectiveMapIds: string[] = []): Task => ({
+    id,
+    name: id,
+    normalizedName: id,
+    experience: 0,
+    minPlayerLevel: null,
+    kappaRequired: null,
+    lightkeeperRequired: null,
+    factionName: "Any",
+    wikiLink: null,
+    trader: null,
+    map: mapId ? { id: mapId, name: mapId } : null,
+    taskRequirements: [],
+    traderRequirements: [],
+    objectives: objectiveMapIds.length
+      ? [
+          {
+            id: `${id}-o`,
+            description: "",
+            type: "visit",
+            optional: false,
+            maps: objectiveMapIds.map((m) => ({ id: m, name: m })),
+            __typename: "visit",
+          },
+        ]
+      : [],
+    neededKeys: [],
+  });
+
+  it("keeps maps that have a task assigned to them", () => {
+    expect(mapsWithTasks(MAPS, [task("t", "m1")]).map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("drops level-bracket variants that only appear in objectives", () => {
+    // A Ground Zero objective is tagged with all three variants, so counting objective
+    // mentions would list the same physical location three times over.
+    const tasks = [task("t", "m8", ["m8", "m9", "m10"])];
+    const names = mapsWithTasks(MAPS, tasks).map((m) => m.name);
+    expect(names).toEqual(["Ground Zero"]);
+    expect(names).not.toContain("Ground Zero 21+");
+    expect(names).not.toContain("Ground Zero Tutorial");
+  });
+
+  it("drops a map with no tasks at all", () => {
+    expect(mapsWithTasks(MAPS, [task("t", "m1")]).some((m) => m.id === "m6")).toBe(false);
+  });
+
+  it("returns nothing when no tasks are loaded", () => {
+    expect(mapsWithTasks(MAPS, [])).toEqual([]);
+  });
+});
+
+describe("taskIsOnMap", () => {
+  const base = {
+    id: "t",
+    name: "t",
+    normalizedName: "t",
+    experience: 0,
+    minPlayerLevel: null,
+    kappaRequired: null,
+    lightkeeperRequired: null,
+    factionName: "Any",
+    wikiLink: null,
+    trader: null,
+    taskRequirements: [],
+    traderRequirements: [],
+    objectives: [],
+    neededKeys: [],
+  };
+
+  it("matches on the task's own map", () => {
+    expect(taskIsOnMap({ ...base, map: { id: "m1", name: "Customs" } } as Task, "m1")).toBe(true);
+  });
+
+  it("matches on an objective's map", () => {
+    const t = {
+      ...base,
+      map: null,
+      objectives: [
+        {
+          id: "o",
+          description: "",
+          type: "visit",
+          optional: false,
+          maps: [{ id: "m3", name: "Shoreline" }],
+          __typename: "visit",
+        },
+      ],
+    } as Task;
+    expect(taskIsOnMap(t, "m3")).toBe(true);
+    expect(taskIsOnMap(t, "m1")).toBe(false);
+  });
+
+  it("matches on a needed key's map, so the packing list stays complete", () => {
+    const t = {
+      ...base,
+      map: null,
+      neededKeys: [{ map: { id: "m1", name: "Customs" }, keys: [] }],
+    } as Task;
+    expect(taskIsOnMap(t, "m1")).toBe(true);
   });
 });

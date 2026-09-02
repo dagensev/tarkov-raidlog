@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 
 import { TaskRow, rowStatus } from "@/components/task-row";
 import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
-import { useAvailability, useMaps, useTaskStates, useTasks } from "@/lib/store/hooks";
+import {
+  useAvailability,
+  useMapsWithTasks,
+  useTaskStates,
+  useTasks,
+} from "@/lib/store/hooks";
+import { taskIsOnMap } from "@/lib/tarkovdev/maps";
 
 /**
  * Filters are log-derived only.
@@ -26,7 +32,7 @@ export default function TasksPage() {
   const tasks = useTasks();
   const states = useTaskStates();
   const availability = useAvailability();
-  const maps = useMaps();
+  const maps = useMapsWithTasks();
 
   const [filter, setFilter] = useState<Filter>("started");
   const [query, setQuery] = useState("");
@@ -51,13 +57,7 @@ export default function TasksPage() {
         const status = rowStatus(states.get(task.id));
         if (filter !== "all" && status !== filter) return false;
         if (kappaOnly && !task.kappaRequired) return false;
-        if (mapId) {
-          const onMap =
-            task.map?.id === mapId ||
-            task.objectives.some((o) => o.maps.some((m) => m.id === mapId)) ||
-            task.neededKeys.some((k) => k.map?.id === mapId);
-          if (!onMap) return false;
-        }
+        if (mapId && !taskIsOnMap(task, mapId)) return false;
         if (needle && !task.name.toLowerCase().includes(needle)) {
           const trader = task.trader?.name.toLowerCase() ?? "";
           if (!trader.includes(needle)) return false;

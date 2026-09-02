@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { denormalize, loadCoreBundle, referencedItemIds, type CoreBundle } from "../client";
-import { resolveMap } from "../maps";
+import { mapsWithTasks, resolveMap, taskIsOnMap } from "../maps";
 
 /**
  * Checks the real tarkov.dev JSON API.
@@ -102,6 +102,31 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
     expect(resolveMap(maps, { location: "Interchange" })?.name).toBe("Interchange");
   });
 
+  it("offers only maps that have tasks, and orphans none by doing so", () => {
+    const data = denormalize(bundle!);
+    const pickable = mapsWithTasks(data.maps, data.tasks);
+
+    // Level-bracket variants share objectives with the base map, so listing them would
+    // show the same physical location several times over.
+    const names = pickable.map((m) => m.name);
+    expect(names).toContain("Ground Zero");
+    expect(names).not.toContain("Ground Zero 21+");
+    expect(names).not.toContain("Ground Zero Tutorial");
+    expect(names.length).toBeLessThan(data.maps.length);
+
+    // Every map offered matches at least one task, and no task is reachable only
+    // through a map that was dropped.
+    for (const map of pickable) {
+      expect(data.tasks.some((t) => taskIsOnMap(t, map.id)), map.name).toBe(true);
+    }
+    const orphaned = data.tasks.filter(
+      (t) =>
+        data.maps.some((m) => taskIsOnMap(t, m.id)) &&
+        !pickable.some((m) => taskIsOnMap(t, m.id)),
+    );
+    expect(orphaned.map((t) => t.name)).toEqual([]);
+  });
+
   it("reports what the live API returned", () => {
     const data = denormalize(bundle!);
     const keys = referencedItemIds(bundle!.tasks).length;
@@ -116,6 +141,7 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
         `  kappa tasks   ${data.tasks.filter((t) => t.kappaRequired).length}`,
         `  key items     ${keys}`,
         `  map names     ${data.maps.map((m) => m.name).join(", ")}`,
+        `  pickable maps ${mapsWithTasks(data.maps, data.tasks).map((m) => m.name).join(", ")}`,
         "",
       ].join("\n"),
     );
