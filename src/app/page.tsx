@@ -5,7 +5,12 @@ import Link from "next/link";
 import { ConnectLogs } from "@/components/connect-logs";
 import { EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, Readout, cx } from "@/components/ui";
 import { useAppStore } from "@/lib/store/app-store";
-import { useCurrentMap, useProgressCounts, useSelectedWipe } from "@/lib/store/hooks";
+import {
+  useCurrentMap,
+  useProgressCounts,
+  useSelectedWipe,
+  useTarkovData,
+} from "@/lib/store/hooks";
 
 function RaidBanner() {
   const raid = useAppStore((s) => s.raid);
@@ -137,9 +142,9 @@ function WipePanel() {
 }
 
 function DataStatus() {
-  const data = useAppStore((s) => s.tarkovData);
-  const stale = useAppStore((s) => s.tarkovDataStale);
-  const error = useAppStore((s) => s.tarkovDataError);
+  const data = useTarkovData();
+  const stale = useAppStore((s) => s.dataStale);
+  const error = useAppStore((s) => s.dataError);
 
   if (data && !error && !stale) return null;
 

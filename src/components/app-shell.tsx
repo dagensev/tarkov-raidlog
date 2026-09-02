@@ -42,6 +42,28 @@ function LogLamp() {
   );
 }
 
+function DataLamp() {
+  const loading = useAppStore((s) => s.dataLoading);
+  const error = useAppStore((s) => s.dataError);
+  const tasks = useAppStore((s) => s.bundle);
+  const items = useAppStore((s) => s.itemIndex);
+
+  const state = loading
+    ? { tone: "amber" as const, text: "Loading data", live: true }
+    : error && !tasks
+      ? { tone: "rust" as const, text: "No data", live: false }
+      : tasks
+        ? { tone: "moss" as const, text: items ? "Data ready" : "Names loading", live: !items }
+        : { tone: "muted" as const, text: "No data", live: false };
+
+  return (
+    <span className="flex items-center gap-2">
+      <Lamp tone={state.tone} live={state.live} />
+      <span className="data text-[11px] text-bone-dim">{state.text}</span>
+    </span>
+  );
+}
+
 function StatusStrip() {
   const wipe = useSelectedWipe();
   const currentMap = useCurrentMap();
@@ -58,6 +80,7 @@ function StatusStrip() {
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
       <LogLamp />
+      <DataLamp />
       <span className="flex items-center gap-2">
         <span className="stencil text-[10px] text-muted">Wipe</span>
         <span className="data text-[11px] text-bone-dim">{wipeLabel}</span>

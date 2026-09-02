@@ -13,6 +13,7 @@ function task(id: string, requirements: TaskRequirement[] = []): Task {
   return {
     id,
     name: id,
+    normalizedName: id,
     experience: 0,
     minPlayerLevel: null,
     kappaRequired: null,

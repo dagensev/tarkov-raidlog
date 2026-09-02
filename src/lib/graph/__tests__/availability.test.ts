@@ -8,6 +8,7 @@ function task(id: string, overrides: Partial<Task> = {}): Task {
   return {
     id,
     name: id,
+    normalizedName: id,
     experience: 0,
     minPlayerLevel: null,
     kappaRequired: null,

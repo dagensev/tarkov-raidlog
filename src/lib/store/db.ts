@@ -1,9 +1,10 @@
 import { openDB, type IDBPDatabase } from "idb";
 
+import type { Faction } from "@/lib/graph/availability";
 import type { LogEvent } from "@/lib/logs/events";
 import type { TaskStatus } from "@/lib/logs/progress";
-import type { TarkovData } from "@/lib/tarkovdev/types";
-import type { Faction } from "@/lib/graph/availability";
+import type { CoreBundle, ItemIndex } from "@/lib/tarkovdev/client";
+import type { GameMode } from "@/lib/tarkovdev/endpoints";
 
 /**
  * Local persistence.
@@ -31,6 +32,8 @@ export interface Settings {
   wipeId: string | null;
   /** Map chosen by hand, overriding detection. */
   mapOverride: string | null;
+  /** Game mode chosen by hand, or null to take it from the logs' `Session mode:`. */
+  gameMode: GameMode | null;
   /** Poll interval while the game is running, in ms. */
   pollIntervalMs: number;
 }
@@ -41,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   traderLevels: {},
   wipeId: null,
   mapOverride: null,
+  gameMode: null,
   pollIntervalMs: 2000,
 };
 
@@ -49,8 +53,10 @@ interface StoredValues {
   events: LogEvent[];
   settings: Settings;
   manualTasks: Record<string, TaskStatus>;
-  tarkovData: TarkovData;
-  tarkovDataFetchedAt: number;
+  /** Trimmed API documents, keyed by nothing — one bundle per game mode at a time. */
+  tarkovBundle: CoreBundle;
+  /** Names for the handful of items tasks reference. Loaded after the core bundle. */
+  itemIndex: ItemIndex;
 }
 
 type StoredKey = keyof StoredValues;
@@ -87,29 +93,9 @@ export async function loadSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...((await get("settings")) ?? {}) };
 }
 
-/** How long cached tarkov.dev data is considered fresh. */
-export const TARKOV_DATA_TTL_MS = 24 * 60 * 60 * 1000;
+/** How long a cached bundle is considered fresh. */
+export const BUNDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
-export interface CachedTarkovData {
-  data: TarkovData;
-  fetchedAt: number;
-  stale: boolean;
-}
-
-/**
- * Read cached game data.
- *
- * Returns stale data rather than nothing when the cache is past its TTL: the API is a
- * free community service that does go down, and yesterday's task list beats an empty
- * screen. The caller decides whether to try refreshing.
- */
-export async function loadCachedTarkovData(): Promise<CachedTarkovData | null> {
-  const [data, fetchedAt] = await Promise.all([get("tarkovData"), get("tarkovDataFetchedAt")]);
-  if (!data) return null;
-  const at = fetchedAt ?? 0;
-  return { data, fetchedAt: at, stale: Date.now() - at > TARKOV_DATA_TTL_MS };
-}
-
-export async function saveTarkovData(data: TarkovData): Promise<void> {
-  await Promise.all([set("tarkovData", data), set("tarkovDataFetchedAt", Date.now())]);
+export function isStale(bundle: CoreBundle | undefined): boolean {
+  return !bundle || Date.now() - bundle.fetchedAt > BUNDLE_TTL_MS;
 }

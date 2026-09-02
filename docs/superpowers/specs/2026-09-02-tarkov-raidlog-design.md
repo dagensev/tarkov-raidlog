@@ -1,6 +1,6 @@
 # Tarkov Raidlog — Design
 
-**Status:** approved 2026-09-02. Phase 1 implemented.
+**Status:** approved 2026-09-02. Phases 1-3 implemented; squad sync outstanding.
 
 ## Problem
 
@@ -94,6 +94,8 @@ are *equal* across the two wipes (97), because the same early quests are redone 
   rewrite to `index.html`, and `/api/v2/**` to a single Cloud Function. No SSR anywhere.
 - Supabase was considered and rejected: its free tier **pauses a project after one week of
   inactivity**, which is the wrong failure mode for a tool used in bursts between wipes.
+- tarkov.dev is called straight from the browser. `NEXT_PUBLIC_TARKOV_ENDPOINT` can point
+  at a same-origin Worker proxy if their CORS policy ever stops allowing it.
 
 ## Architecture
 
@@ -109,9 +111,56 @@ so adopting vinext/OpenNext later is a contained change.
 - **TarkovTracker** — `tarkovdata.js` builds the task graph with **graphology**
   (`mergeEdge(requirement.task.id, task.id)`, recursive `inNeighbors`/`outNeighbors`,
   `active` requirements inherit predecessors rather than adding an edge); `progress.js`
-  computes availability from parents + `minPlayerLevel` + trader levels + faction;
-  `tarkovdataquery.js` already requests `wikiLink` and `neededKeys { keys {…} map {…} }`,
-  so the wiki-link and required-keys features come from the query itself.
+  computes availability from parents + `minPlayerLevel` + trader levels + faction. That
+  dependency logic is what was worth borrowing, and it ports cleanly.
+
+### tarkov.dev is a JSON API, not GraphQL
+
+An earlier draft of this design was built against `api.tarkov.dev/graphql`, following
+TarkovTracker's `tarkovdataquery.js`. That endpoint now answers
+`422 {"errors":["GraphQL server unavailable. Try again later."]}` to every request,
+including a bare `{maps{id}}`, from Node and from a browser on tarkov.dev's own origin.
+It was mistaken for an outage. It is not: **tarkov.dev has retired GraphQL.** Their API
+page states the replacement plainly — "the API serves JSON responses to simple GET
+requests" — with the endpoint list at `https://json.tarkov.dev/endpoints`. TarkovTracker's
+query is therefore a stale reference, useful only for its field names.
+
+Three properties of the replacement drive `lib/tarkovdev/`:
+
+1. **Normalized.** `task.trader`, `task.map`, `taskRequirements[].task` and
+   `neededKeys[].keys` are id strings. The client denormalizes into nested objects so the
+   graph, availability and UI code stay as written.
+2. **Separately localized.** `task.name` is the translation *key* `"<id> name"`, resolved
+   against `<path>_en`, a flat dictionary. Map names use `"<id> Name"` — capital N.
+   `wikiLink` and `normalizedName` are plain and need no lookup.
+3. **Split by game mode** — `regular`, `pve`, `pvp-season` — which maps one-to-one onto
+   the `Session mode:` values the logs already give us, so the dataset follows what is
+   being played.
+
+Two inconsistencies worth knowing, both found by testing against the live service rather
+than by reading: `tasks` and `maps` nest their collection under `data.tasks` / `data.maps`,
+but **`traders` keys its objects directly off `data`** — reading `data.traders` silently
+yielded an empty list and rendered trader ids in place of names. And `kappaRequired` is
+true for only 13 of 491 tasks in the seasonal mode, so any assertion that it is common is
+wrong.
+
+Payload sizes shape the loading strategy: tasks 2.0 MB, tasks_en 249 KB, traders 49 KB,
+maps 9.5 MB (stripped to per-map metadata on arrival, since the bulk is mobs and loot
+containers), **items 15.8 MB**. Items exist only to name the ~90 key items tasks
+reference, so they load after the task list is on screen and are filtered down to those
+ids before being cached.
+
+### Map detection is data-driven
+
+Both log signals match a field the API publishes, so this is exact lookup, not a
+maintained table:
+
+- `scene preset path:maps/customs_preset.bundle` matches `GameMap.scenePath` verbatim.
+- `UserConfirmed.location` matches `GameMap.nameId` — including `bigmap` for Customs.
+
+An earlier hardcoded table got two cases wrong that the data settles: `sandbox_start_preset`
+is Ground Zero **Tutorial**, and `factory_night_preset` is **Night Factory** — both
+separate maps with separate task lists.
 
 ### Departure from the references
 

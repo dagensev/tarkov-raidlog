@@ -3,7 +3,8 @@
 import { ConnectLogs } from "@/components/connect-logs";
 import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from "@/components/ui";
 import { useAppStore } from "@/lib/store/app-store";
-import { useSelectedWipe } from "@/lib/store/hooks";
+import { useGameMode, useSelectedWipe, useTarkovData } from "@/lib/store/hooks";
+import { GAME_MODES } from "@/lib/tarkovdev/endpoints";
 
 function fmt(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, {
@@ -173,19 +174,63 @@ function LogPanel() {
 }
 
 function DataPanel() {
-  const refresh = useAppStore((s) => s.refreshTarkovData);
-  const data = useAppStore((s) => s.tarkovData);
-  const error = useAppStore((s) => s.tarkovDataError);
+  const refresh = useAppStore((s) => s.refreshData);
+  const update = useAppStore((s) => s.updateSettings);
+  const data = useTarkovData();
+  const error = useAppStore((s) => s.dataError);
+  const loading = useAppStore((s) => s.dataLoading);
+  const chosenMode = useAppStore((s) => s.settings.gameMode);
+  const sessionMode = useAppStore((s) => s.sessionMode);
+  const mode = useGameMode();
 
   return (
     <Panel className="rise" style={{ animationDelay: "120ms" }}>
-      <PanelHeader title="Game data" meta={data ? `${data.tasks.length} tasks` : "none"} />
-      <div className="space-y-3 px-4 py-4">
-        <Button onClick={() => void refresh(true)}>Refresh from tarkov.dev</Button>
+      <PanelHeader
+        title="Game data"
+        meta={loading ? "loading…" : data ? `${data.tasks.length} tasks` : "none"}
+      />
+      <div className="space-y-4 px-4 py-4">
+        <div className="flex flex-col gap-1.5">
+          <Label>Game mode</Label>
+          <div className="flex flex-wrap">
+            {GAME_MODES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => void update({ gameMode: option })}
+                className={cx(
+                  "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
+                  mode === option
+                    ? "border-amber bg-amber/15 text-amber"
+                    : "border-line-bright text-muted hover:text-bone-dim",
+                )}
+              >
+                {option}
+              </button>
+            ))}
+            {chosenMode ? (
+              <Button variant="ghost" onClick={() => void update({ gameMode: null })}>
+                Use logs
+              </Button>
+            ) : null}
+          </div>
+          <p className="data text-[10px] text-muted">
+            {chosenMode
+              ? "Chosen by you."
+              : sessionMode
+                ? `Detected from your logs (Session mode: ${sessionMode}).`
+                : "No session mode seen in the logs yet."}
+          </p>
+        </div>
+
+        <Button onClick={() => void refresh(true)} disabled={loading}>
+          {loading ? "Loading…" : "Refresh from tarkov.dev"}
+        </Button>
         {error ? <p className="data text-[11px] text-rust">{error}</p> : null}
         <p className="text-[12px] leading-relaxed text-muted">
-          Cached on this machine and refreshed daily. If tarkov.dev is down, the last copy keeps
-          being used.
+          Cached on this machine and refreshed daily. Tasks, maps and traders load first; item
+          names follow, since the full item catalogue is a 15.8&nbsp;MB download for the sake of
+          labelling keys.
         </p>
       </div>
     </Panel>

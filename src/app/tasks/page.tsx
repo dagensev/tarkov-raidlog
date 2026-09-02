@@ -4,8 +4,7 @@ import { useMemo, useState } from "react";
 
 import { TaskRow } from "@/components/task-row";
 import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
-import { useAppStore } from "@/lib/store/app-store";
-import { useAvailability, useTaskStates, useTasks } from "@/lib/store/hooks";
+import { useAvailability, useMaps, useTaskStates, useTasks } from "@/lib/store/hooks";
 
 type Filter = "active" | "available" | "started" | "finished" | "locked" | "all";
 
@@ -22,7 +21,7 @@ export default function TasksPage() {
   const tasks = useTasks();
   const states = useTaskStates();
   const availability = useAvailability();
-  const maps = useAppStore((s) => s.tarkovData?.maps);
+  const maps = useMaps();
 
   const [filter, setFilter] = useState<Filter>("active");
   const [query, setQuery] = useState("");
@@ -118,7 +117,7 @@ export default function TasksPage() {
               className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
             >
               <option value="">Any map</option>
-              {maps?.map((map) => (
+              {maps.map((map) => (
                 <option key={map.id} value={map.id}>
                   {map.name}
                 </option>
@@ -143,7 +142,7 @@ export default function TasksPage() {
 
       <Panel className="rise" style={{ animationDelay: "60ms" }}>
         <PanelHeader
-          title={mapId ? `Tasks · ${maps?.find((m) => m.id === mapId)?.name}` : "Tasks"}
+          title={mapId ? `Tasks · ${maps.find((m) => m.id === mapId)?.name}` : "Tasks"}
           meta={`${visible.length} of ${tasks.length}`}
         />
         {visible.length === 0 ? (

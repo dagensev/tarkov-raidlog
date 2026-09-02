@@ -5,7 +5,13 @@ import { useMemo } from "react";
 import { TaskRow } from "@/components/task-row";
 import { EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from "@/components/ui";
 import { useAppStore } from "@/lib/store/app-store";
-import { useAvailability, useCurrentMap, useTaskStates, useTasks } from "@/lib/store/hooks";
+import {
+  useAvailability,
+  useCurrentMap,
+  useMaps,
+  useTaskStates,
+  useTasks,
+} from "@/lib/store/hooks";
 import { tarkovDevMapUrl } from "@/lib/tarkovdev/maps";
 
 /**
@@ -16,7 +22,7 @@ import { tarkovDevMapUrl } from "@/lib/tarkovdev/maps";
  */
 
 function MapPicker() {
-  const maps = useAppStore((s) => s.tarkovData?.maps);
+  const maps = useMaps();
   const override = useAppStore((s) => s.settings.mapOverride);
   const update = useAppStore((s) => s.updateSettings);
   const scene = useAppStore((s) => s.raid.scene);
@@ -29,7 +35,7 @@ function MapPicker() {
         className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
       >
         <option value="">Detect from logs{scene ? ` (${scene})` : ""}</option>
-        {maps?.map((map) => (
+        {maps.map((map) => (
           <option key={map.id} value={map.id}>
             {map.name}
           </option>

@@ -63,6 +63,8 @@ export interface NeededKeys {
 export interface Task {
   id: string;
   name: string;
+  /** Plain slug from the API, e.g. `first-in-line`. Needs no translation lookup. */
+  normalizedName: string;
   experience: number;
   minPlayerLevel: number | null;
   kappaRequired: boolean | null;
@@ -81,7 +83,12 @@ export interface Task {
 export interface GameMap {
   id: string;
   name: string;
-  tarkovDataId: number | null;
+  /** Plain slug, e.g. `customs`. Used to build tarkov.dev links. */
+  normalizedName: string;
+  /** BSG's internal location id, e.g. `bigmap`. Matches `UserConfirmed.location`. */
+  nameId: string;
+  /** Unity scene bundle, e.g. `maps/customs_preset.bundle`. Matches the application log. */
+  scenePath: string | null;
   wiki: string | null;
   raidDuration: number | null;
   players: string | null;

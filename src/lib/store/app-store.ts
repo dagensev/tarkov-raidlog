@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-import type { LogEvent, MapLoadingEvent, RaidStartingEvent } from "@/lib/logs/events";
+import type { LogEvent } from "@/lib/logs/events";
 import {
   FileSystemAccessLogSource,
   checkPermission,
@@ -12,10 +12,21 @@ import {
 import type { TaskStatus } from "@/lib/logs/progress";
 import { LogWatcher, type ScanProgress } from "@/lib/logs/watcher";
 import { analyzeWipes, type WipeAnalysis } from "@/lib/logs/wipe";
-import { fetchTarkovData } from "@/lib/tarkovdev/client";
-import type { TarkovData } from "@/lib/tarkovdev/types";
+import {
+  denormalize,
+  loadCoreBundle,
+  loadItemIndex,
+  referencedItemIds,
+  type CoreBundle,
+  type ItemIndex,
+} from "@/lib/tarkovdev/client";
+import {
+  DEFAULT_GAME_MODE,
+  gameModeFromSessionMode,
+  type GameMode,
+} from "@/lib/tarkovdev/endpoints";
 import * as db from "./db";
-import { DEFAULT_SETTINGS, type Settings } from "./db";
+import { DEFAULT_SETTINGS, isStale, type Settings } from "./db";
 
 export type LogStatus =
   | "idle"
@@ -26,7 +37,7 @@ export type LogStatus =
   | "error";
 
 export interface RaidState {
-  /** Scene bundle name from the application log, the earliest signal. */
+  /** Scene bundle path from the application log, the earliest signal. */
   scene?: string;
   /** BSG location id from the UserConfirmed payload. */
   location?: string;
@@ -45,9 +56,14 @@ interface AppState {
   manualTasks: Record<string, TaskStatus>;
   settings: Settings;
 
-  tarkovData: TarkovData | null;
-  tarkovDataStale: boolean;
-  tarkovDataError: string | null;
+  /** Trimmed API documents. Denormalized on demand by the hooks. */
+  bundle: CoreBundle | null;
+  itemIndex: ItemIndex | null;
+  dataLoading: boolean;
+  dataStale: boolean;
+  dataError: string | null;
+  /** The `Session mode:` most recently seen in the logs. */
+  sessionMode: string | null;
 
   raid: RaidState;
 
@@ -55,7 +71,7 @@ interface AppState {
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
   rescan: () => Promise<void>;
-  refreshTarkovData: (force?: boolean) => Promise<void>;
+  refreshData: (force?: boolean) => Promise<void>;
   setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
@@ -72,16 +88,23 @@ function raidFrom(events: readonly LogEvent[], previous: RaidState): RaidState {
   let next = previous;
   for (const event of events) {
     if (event.kind === "map-loading") {
-      const e = event as MapLoadingEvent;
-      next = { ...next, scene: e.scene, active: true, at: e.timestamp };
+      next = { ...next, scene: event.scene, active: true, at: event.timestamp };
     } else if (event.kind === "raid-starting") {
-      const e = event as RaidStartingEvent;
-      next = { ...next, location: e.location, active: true, at: e.timestamp };
+      next = { ...next, location: event.location, active: true, at: event.timestamp };
     } else if (event.kind === "raid-ended") {
       next = { ...next, active: false, at: event.timestamp };
     }
   }
   return next;
+}
+
+/** Latest `Session mode:` in a batch of events, if any. */
+function sessionModeFrom(events: readonly LogEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (event.kind === "session-mode") return event.mode;
+  }
+  return null;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -94,26 +117,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   manualTasks: {},
   settings: DEFAULT_SETTINGS,
 
-  tarkovData: null,
-  tarkovDataStale: false,
-  tarkovDataError: null,
+  bundle: null,
+  itemIndex: null,
+  dataLoading: false,
+  dataStale: false,
+  dataError: null,
+  sessionMode: null,
 
   raid: { active: false, at: 0 },
 
   async hydrate() {
-    const [settings, manualTasks, events, cached] = await Promise.all([
+    const [settings, manualTasks, events, bundle, itemIndex] = await Promise.all([
       db.loadSettings(),
       db.get("manualTasks"),
       db.get("events"),
-      db.loadCachedTarkovData(),
+      db.get("tarkovBundle"),
+      db.get("itemIndex"),
     ]);
 
     set({
       settings,
       manualTasks: manualTasks ?? {},
       events: events ?? [],
-      tarkovData: cached?.data ?? null,
-      tarkovDataStale: cached?.stale ?? false,
+      bundle: bundle ?? null,
+      itemIndex: itemIndex ?? null,
+      dataStale: isStale(bundle),
+      sessionMode: sessionModeFrom(events ?? []),
     });
 
     const handle = await db.get("logDirectory");
@@ -128,7 +157,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    void get().refreshTarkovData();
+    void get().refreshData();
   },
 
   async connectLogs() {
@@ -136,6 +165,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const handle = await pickLogDirectory();
       await db.set("logDirectory", handle);
       await startWatching(handle, set, get);
+      // The scan may have revealed which game mode is being played.
+      void get().refreshData();
     } catch (error) {
       // An aborted picker is the user changing their mind, not a failure.
       if ((error as DOMException)?.name === "AbortError") return;
@@ -162,16 +193,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     await startWatching(handle, set, get);
   },
 
-  async refreshTarkovData(force = false) {
-    const { tarkovData, tarkovDataStale } = get();
-    if (tarkovData && !tarkovDataStale && !force) return;
+  async refreshData(force = false) {
+    const state = get();
+    const mode = resolveGameMode(state);
+    const fresh = state.bundle && state.bundle.mode === mode && !isStale(state.bundle);
+    if (fresh && !force) return;
+    if (state.dataLoading) return;
+
+    set({ dataLoading: true, dataError: null });
     try {
-      const data = await fetchTarkovData();
-      await db.saveTarkovData(data);
-      set({ tarkovData: data, tarkovDataStale: false, tarkovDataError: null });
+      const bundle = await loadCoreBundle(mode);
+      await db.set("tarkovBundle", bundle);
+      set({ bundle, dataStale: false, dataLoading: false });
+
+      // Item names are only needed to label keys, and cost a 15.8 MB download, so they
+      // arrive after the task list is already on screen.
+      void loadItems(bundle, set);
     } catch (error) {
       // Keep whatever is cached; a stale task list beats an empty screen.
-      set({ tarkovDataError: (error as Error).message });
+      set({ dataError: (error as Error).message, dataLoading: false });
     }
   },
 
@@ -187,6 +227,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const settings = { ...get().settings, ...patch };
     set({ settings });
     await db.set("settings", settings);
+    // Switching game mode means a different dataset.
+    if (patch.gameMode !== undefined) void get().refreshData();
   },
 
   stopWatching() {
@@ -197,6 +239,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 type SetState = (partial: Partial<AppState>) => void;
 type GetState = () => AppState;
+
+/** Manual choice wins; otherwise take it from the logs; otherwise the season default. */
+function resolveGameMode(state: Pick<AppState, "settings" | "sessionMode">): GameMode {
+  return (
+    state.settings.gameMode ??
+    gameModeFromSessionMode(state.sessionMode ?? undefined) ??
+    DEFAULT_GAME_MODE
+  );
+}
+
+async function loadItems(bundle: CoreBundle, set: SetState): Promise<void> {
+  try {
+    const index = await loadItemIndex(bundle.mode, referencedItemIds(bundle.tasks));
+    await db.set("itemIndex", index);
+    set({ itemIndex: index });
+  } catch {
+    // Keys fall back to showing an id; not worth surfacing as a failure.
+  }
+}
 
 async function startWatching(
   handle: FileSystemDirectoryHandle,
@@ -213,11 +274,11 @@ async function startWatching(
     const { events, observations } = await watcher.scanAll((progress) =>
       set({ scanProgress: progress }),
     );
-    const wipes = analyzeWipes(observations);
     set({
       events,
-      wipes,
+      wipes: analyzeWipes(observations),
       raid: raidFrom(events, get().raid),
+      sessionMode: sessionModeFrom(events) ?? get().sessionMode,
       logStatus: "watching",
       scanProgress: null,
     });
@@ -235,7 +296,11 @@ async function startWatching(
         const fresh = await watcher.poll();
         if (fresh.length === 0) return;
         const events = [...get().events, ...fresh];
-        set({ events, raid: raidFrom(fresh, get().raid) });
+        set({
+          events,
+          raid: raidFrom(fresh, get().raid),
+          sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
+        });
         await db.set("events", events);
       } catch (error) {
         // A revoked permission or a folder that vanished mid-session.
@@ -246,3 +311,5 @@ async function startWatching(
     })();
   }, interval);
 }
+
+export { denormalize, resolveGameMode };
