@@ -84,13 +84,44 @@ interface AppState {
 let watcher: LogWatcher | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * A raid cannot outlast this, so a raid-start older than it is history, not a raid in
+ * progress. The longest map is 50 minutes; the rest is queue and load time.
+ */
+export const RAID_ACTIVE_WINDOW_MS = 90 * 60 * 1000;
+
+/**
+ * Whether the last raid events describe a raid happening *now*.
+ *
+ * The window matters because the game does not always write `UserMatchOver` — if it is
+ * closed mid-raid, the log simply stops. Without a cutoff, a full historical scan replays
+ * that dangling raid-start and the app insists you are in a raid forever.
+ */
+export function isRaidActive(raid: RaidState, now = Date.now()): boolean {
+  return raid.active && now - raid.at < RAID_ACTIVE_WINDOW_MS;
+}
+
+/**
+ * Fold raid events into the current raid state.
+ *
+ * Events are sorted first: each log file is read whole before the next, so a batch
+ * arrives grouped by file rather than in time order, and a `raid-starting` from the
+ * notifications log can land after a later `game-started` from the application log.
+ * Only this reducer cares about order — task progress compares timestamps directly.
+ */
 function raidFrom(events: readonly LogEvent[], previous: RaidState): RaidState {
+  const ordered = [...events].sort((a, b) => a.timestamp - b.timestamp);
   let next = previous;
-  for (const event of events) {
+  for (const event of ordered) {
     if (event.kind === "map-loading") {
       next = { ...next, scene: event.scene, active: true, at: event.timestamp };
     } else if (event.kind === "raid-starting") {
       next = { ...next, location: event.location, active: true, at: event.timestamp };
+    } else if (event.kind === "game-started") {
+      // The last thing the game logs before you are actually playing, so it is the best
+      // anchor for the recency window — measuring from map-load would spend several
+      // minutes of it on queue and loading.
+      next = { ...next, active: true, at: event.timestamp };
     } else if (event.kind === "raid-ended") {
       next = { ...next, active: false, at: event.timestamp };
     }
@@ -313,3 +344,6 @@ async function startWatching(
 }
 
 export { denormalize, resolveGameMode };
+
+/** Exposed for tests: the ordering rule is easy to regress and hard to see from outside. */
+export { raidFrom as __testRaidFrom };

@@ -8,15 +8,16 @@ import { useAppStore } from "@/lib/store/app-store";
 import {
   useCurrentMap,
   useProgressCounts,
+  useRaidActive,
   useSelectedWipe,
   useTarkovData,
 } from "@/lib/store/hooks";
 
 function RaidBanner() {
-  const raid = useAppStore((s) => s.raid);
+  const inRaid = useRaidActive();
   const map = useCurrentMap();
 
-  if (!raid.active) return null;
+  if (!inRaid) return null;
 
   return (
     <Panel className="rise overflow-hidden border-amber/40">

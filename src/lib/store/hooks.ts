@@ -9,7 +9,7 @@ import type { ProfileGeneration } from "@/lib/logs/wipe";
 import { denormalize } from "@/lib/tarkovdev/client";
 import { resolveMap } from "@/lib/tarkovdev/maps";
 import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
-import { resolveGameMode, useAppStore } from "./app-store";
+import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
 
 /**
  * Derived views over the store.
@@ -115,6 +115,17 @@ export function useCurrentMap(): GameMap | undefined {
     if (!scene && !location) return undefined;
     return resolveMap(maps, { scene, location });
   }, [maps, override, scene, location]);
+}
+
+/**
+ * Whether a raid is happening now, not merely the last thing the logs described.
+ *
+ * Re-evaluated on every store change rather than on a timer: after a scan of old logs
+ * the window has long passed, which is the case that matters.
+ */
+export function useRaidActive(): boolean {
+  const raid = useAppStore((s) => s.raid);
+  return useMemo(() => isRaidActive(raid), [raid]);
 }
 
 /** Counts for the overview board. */

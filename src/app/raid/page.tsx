@@ -9,6 +9,7 @@ import {
   useAvailability,
   useCurrentMap,
   useMaps,
+  useRaidActive,
   useTaskStates,
   useTasks,
 } from "@/lib/store/hooks";
@@ -48,7 +49,7 @@ function MapPicker() {
 
 export default function RaidPage() {
   const map = useCurrentMap();
-  const raid = useAppStore((s) => s.raid);
+  const inRaid = useRaidActive();
   const tasks = useTasks();
   const states = useTaskStates();
   const availability = useAvailability();
@@ -103,11 +104,11 @@ export default function RaidPage() {
 
   return (
     <div className="space-y-4">
-      <Panel className={cx("rise", raid.active && "border-amber/40")}>
+      <Panel className={cx("rise", inRaid && "border-amber/40")}>
         <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
           <div className="space-y-2">
             <div className="flex items-center gap-3">
-              {raid.active ? <Lamp tone="amber" live /> : null}
+              {inRaid ? <Lamp tone="amber" live /> : null}
               <h1 className="stencil text-2xl text-amber glow-amber">{map.name}</h1>
             </div>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1">

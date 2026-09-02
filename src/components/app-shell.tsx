@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
 import { useAppStore } from "@/lib/store/app-store";
-import { useCurrentMap, useSelectedWipe } from "@/lib/store/hooks";
+import { useCurrentMap, useRaidActive, useSelectedWipe } from "@/lib/store/hooks";
 import { Lamp, cx } from "./ui";
 
 const NAV = [
@@ -67,7 +67,7 @@ function DataLamp() {
 function StatusStrip() {
   const wipe = useSelectedWipe();
   const currentMap = useCurrentMap();
-  const inRaid = useAppStore((s) => s.raid.active);
+  const inRaid = useRaidActive();
 
   const wipeLabel = wipe
     ? new Date(wipe.firstSeenAt).toLocaleDateString(undefined, {
