@@ -2,22 +2,23 @@
 
 import { useMemo, useState } from "react";
 
-import { TaskRow } from "@/components/task-row";
+import { TaskRow, rowStatus } from "@/components/task-row";
 import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
 import { useAvailability, useMaps, useTaskStates, useTasks } from "@/lib/store/hooks";
 
-type Filter = "todo" | "available" | "started" | "finished" | "locked" | "all";
-
 /**
- * `todo` is the union of ready and in-progress — everything you could act on. It is
- * named separately from both so no label describes two different sets.
+ * Filters are log-derived only.
+ *
+ * There was a "Ready" filter built on computed availability. It was dropped because it
+ * could not be trusted: trader loyalty is not in the logs, 176 tasks carry event flags we
+ * do not evaluate, and 13 unlock on a timer we ignore. Showing a confident "ready" that is
+ * sometimes wrong is worse than not showing one.
  */
+type Filter = "started" | "finished" | "all";
+
 const FILTERS: Array<{ id: Filter; label: string; title: string }> = [
-  { id: "todo", label: "To do", title: "Ready to pick up, plus what you are already holding" },
-  { id: "available", label: "Ready", title: "Nothing is blocking these — go pick them up" },
-  { id: "started", label: "In progress", title: "Already accepted, not yet handed in" },
+  { id: "started", label: "In progress", title: "Accepted and not yet handed in" },
   { id: "finished", label: "Done", title: "Completed this wipe" },
-  { id: "locked", label: "Locked", title: "Something is unmet — open a task to see what" },
   { id: "all", label: "All", title: "Every task in the game" },
 ];
 
@@ -27,33 +28,28 @@ export default function TasksPage() {
   const availability = useAvailability();
   const maps = useMaps();
 
-  const [filter, setFilter] = useState<Filter>("todo");
+  const [filter, setFilter] = useState<Filter>("started");
   const [query, setQuery] = useState("");
   const [mapId, setMapId] = useState<string>("");
   const [kappaOnly, setKappaOnly] = useState(false);
 
   const counts = useMemo<Record<Filter, number>>(() => {
-    const tally = { available: 0, started: 0, finished: 0, locked: 0, failed: 0 };
-    for (const entry of availability.values()) {
-      if (entry.status in tally) tally[entry.status as keyof typeof tally] += 1;
+    let started = 0;
+    let finished = 0;
+    for (const task of tasks) {
+      const status = rowStatus(states.get(task.id));
+      if (status === "started") started += 1;
+      if (status === "finished") finished += 1;
     }
-    return {
-      available: tally.available,
-      started: tally.started,
-      finished: tally.finished,
-      locked: tally.locked,
-      todo: tally.available + tally.started,
-      all: availability.size,
-    };
-  }, [availability]);
+    return { started, finished, all: tasks.length };
+  }, [tasks, states]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return tasks
       .filter((task) => {
-        const status = availability.get(task.id)?.status ?? "available";
-        if (filter === "todo" && status !== "available" && status !== "started") return false;
-        if (filter !== "todo" && filter !== "all" && status !== filter) return false;
+        const status = rowStatus(states.get(task.id));
+        if (filter !== "all" && status !== filter) return false;
         if (kappaOnly && !task.kappaRequired) return false;
         if (mapId) {
           const onMap =
@@ -69,15 +65,15 @@ export default function TasksPage() {
         return true;
       })
       .sort((a, b) => {
-        // Ready before in-progress, then by trader so a run is grouped by who to hand in to.
-        const rank = (id: string) => (availability.get(id)?.status === "started" ? 0 : 1);
+        // In progress first, then grouped by trader so a run follows who to hand in to.
+        const rank = (id: string) => (rowStatus(states.get(id)) === "started" ? 0 : 1);
         return (
           rank(a.id) - rank(b.id) ||
           (a.trader?.name ?? "").localeCompare(b.trader?.name ?? "") ||
           a.name.localeCompare(b.name)
         );
       });
-  }, [tasks, availability, filter, query, mapId, kappaOnly]);
+  }, [tasks, states, filter, query, mapId, kappaOnly]);
 
   if (tasks.length === 0) {
     return (

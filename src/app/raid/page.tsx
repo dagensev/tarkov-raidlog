@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 
-import { TaskRow } from "@/components/task-row";
+import { TaskRow, rowStatus } from "@/components/task-row";
 import { EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from "@/components/ui";
 import { useAppStore } from "@/lib/store/app-store";
 import {
@@ -54,18 +54,19 @@ export default function RaidPage() {
   const states = useTaskStates();
   const availability = useAvailability();
 
+  // Everything on this map you have not finished, rather than what we guess is
+  // "available" -- the same guess the task filters dropped as unreliable.
   const onMap = useMemo(() => {
     if (!map) return [];
     return tasks.filter((task) => {
-      const status = availability.get(task.id)?.status;
-      if (status !== "available" && status !== "started") return false;
+      if (rowStatus(states.get(task.id)) === "finished") return false;
       return (
         task.map?.id === map.id ||
         task.objectives.some((o) => o.maps.some((m) => m.id === map.id)) ||
         task.neededKeys.some((k) => k.map?.id === map.id)
       );
     });
-  }, [tasks, availability, map]);
+  }, [tasks, states, map]);
 
   // Keys for this map across every task you could be working — the pre-raid packing list.
   const keys = useMemo(() => {
@@ -172,15 +173,20 @@ export default function RaidPage() {
       ) : null}
 
       <Panel className="rise" style={{ animationDelay: "120ms" }}>
-        <PanelHeader title="What you can do here" meta={`${onMap.length} tasks`} />
+        <PanelHeader title="Unfinished here" meta={`${onMap.length} tasks`} />
         {onMap.length === 0 ? (
           <EmptyNote>
-            Nothing available on {map.name} right now. Check the Tasks tab for what is locked and
-            why.
+            Nothing left on {map.name}.
           </EmptyNote>
         ) : (
           <ul>
-            {onMap.map((task) => (
+            {[...onMap]
+              .sort(
+                (a, b) =>
+                  (rowStatus(states.get(a.id)) === "started" ? 0 : 1) -
+                  (rowStatus(states.get(b.id)) === "started" ? 0 : 1),
+              )
+              .map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}

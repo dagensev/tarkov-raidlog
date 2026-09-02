@@ -9,17 +9,25 @@ import { useAppStore } from "@/lib/store/app-store";
 import { Pill, cx } from "./ui";
 
 /**
- * Labels here must match the filter tabs on the tasks page exactly. They did not: a
- * started task was pilled "Active" while the "Active" tab meant started *and* ready, so
- * the same word named two different sets.
+ * Status shown per task comes from the logs alone — done, in progress, failed, or not
+ * started. It deliberately does not report whether a task is *available*: that would
+ * depend on trader loyalty we cannot read, event flags we do not evaluate, and unlock
+ * delays we ignore, so it was wrong often enough to be misleading.
+ *
+ * Requirements are still surfaced, as information rather than as a verdict.
  */
-const STATUS_STYLE = {
+type RowStatus = "finished" | "started" | "failed" | "not-started";
+
+const STATUS_STYLE: Record<RowStatus, { rail: string; label: string; tone: Parameters<typeof Pill>[0]["tone"] }> = {
   finished: { rail: "bg-moss", label: "Done", tone: "moss" },
   started: { rail: "bg-amber", label: "In progress", tone: "amber" },
-  available: { rail: "bg-bone-dim", label: "Ready", tone: "muted" },
-  locked: { rail: "bg-line-bright", label: "Locked", tone: "muted" },
   failed: { rail: "bg-rust", label: "Failed", tone: "rust" },
-} as const;
+  "not-started": { rail: "bg-line-bright", label: "Not started", tone: "muted" },
+};
+
+export function rowStatus(state?: TaskState): RowStatus {
+  return state?.status ?? "not-started";
+}
 
 /** Keys needed on a given map, which is the thing you want to know before you queue. */
 function KeyList({ task, mapId }: { task: Task; mapId?: string }) {
@@ -46,22 +54,23 @@ function KeyList({ task, mapId }: { task: Task; mapId?: string }) {
   );
 }
 
-function Reasons({ availability }: { availability: TaskAvailability }) {
-  if (availability.reasons.length === 0) return null;
+/** Unmet prerequisites, phrased as information rather than a locked verdict. */
+function Requires({ availability }: { availability: TaskAvailability }) {
+  const reasons = availability.reasons.filter((r) => r.kind !== "trader");
+  if (reasons.length === 0) return null;
   return (
-    <ul className="space-y-1 pt-1">
-      {availability.reasons.map((reason, i) => (
-        <li key={i} className="data text-[11px] text-muted">
-          {reason.kind === "task" && `Needs “${reason.taskName}” ${reason.need.join(" or ")}`}
-          {reason.kind === "level" && `Needs level ${reason.required} (you are ${reason.current})`}
-          {reason.kind === "trader" &&
-            `Needs ${reason.traderName} LL${reason.required}${
-              reason.current !== undefined ? ` (you are LL${reason.current})` : ""
-            }`}
-          {reason.kind === "faction" && `${reason.required} only`}
-        </li>
-      ))}
-    </ul>
+    <div className="pt-1">
+      <span className="stencil text-[9px] text-muted">Requires</span>
+      <ul className="mt-1 space-y-1">
+        {reasons.map((reason, i) => (
+          <li key={i} className="data text-[11px] text-muted">
+            {reason.kind === "task" && `“${reason.taskName}” ${reason.need.join(" or ")}`}
+            {reason.kind === "level" && `Level ${reason.required} (you are ${reason.current})`}
+            {reason.kind === "faction" && `${reason.required} only`}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -76,12 +85,14 @@ export function TaskRow({
   availability?: TaskAvailability;
   mapId?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const setManualTask = useAppStore((s) => s.setManualTask);
 
-  const status = availability?.status ?? "available";
+  const status = rowStatus(state);
   const style = STATUS_STYLE[status];
   const isDone = status === "finished";
+  const fromLogs = isDone && state?.origin === "log";
+
   const objectives = mapId
     ? task.objectives.filter((o) => o.maps.some((m) => m.id === mapId))
     : task.objectives;
@@ -92,16 +103,30 @@ export function TaskRow({
 
       <div className="min-w-0 flex-1 py-2.5 pr-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className={cx(
-              "cursor-pointer text-left text-[14px] leading-tight transition-colors",
-              isDone ? "text-muted line-through decoration-moss/50" : "text-bone hover:text-amber",
-            )}
-          >
-            {task.name}
-          </button>
+          {/* The name is the wiki link: it is the thing you reach for mid-raid. */}
+          {task.wikiLink ? (
+            <a
+              href={task.wikiLink}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open “${task.name}” on the wiki`}
+              className={cx(
+                "text-[14px] leading-tight underline decoration-line-bright underline-offset-4 transition-colors hover:decoration-amber",
+                isDone ? "text-muted line-through decoration-moss/50" : "text-bone hover:text-amber",
+              )}
+            >
+              {task.name}
+            </a>
+          ) : (
+            <span
+              className={cx(
+                "text-[14px] leading-tight",
+                isDone ? "text-muted line-through decoration-moss/50" : "text-bone",
+              )}
+            >
+              {task.name}
+            </span>
+          )}
 
           {task.trader ? (
             <span className="data text-[11px] text-bone-dim">{task.trader.name}</span>
@@ -112,19 +137,13 @@ export function TaskRow({
             <span className="data text-[10px] text-muted">Lv{task.minPlayerLevel}</span>
           ) : null}
           {state?.origin === "manual" ? <Pill tone="muted">by hand</Pill> : null}
-          {availability?.unverified ? (
-            <Pill tone="muted" className="opacity-70">
-              trader LL unknown
-            </Pill>
-          ) : null}
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <KeyList task={task} mapId={mapId} />
         </div>
 
-        {open ? (
-          <div className="mt-2 space-y-2 border-l border-line-bright pl-3">
+        <div className="mt-2 space-y-2 border-l border-line-bright pl-3">
             {objectives.length > 0 ? (
               <ul className="space-y-1">
                 {objectives.map((objective) => (
@@ -138,40 +157,64 @@ export function TaskRow({
                 ))}
               </ul>
             ) : null}
-            {availability ? <Reasons availability={availability} /> : null}
-          </div>
-        ) : null}
+          {availability && !isDone ? <Requires availability={availability} /> : null}
+        </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2 py-2.5 pr-3">
         <Pill tone={style.tone}>{style.label}</Pill>
 
-        {task.wikiLink ? (
-          <a
-            href={task.wikiLink}
-            target="_blank"
-            rel="noreferrer"
-            title="Open the wiki page"
-            className="stencil border border-line-bright px-2 py-1 text-[9px] text-muted transition-colors hover:border-amber-dim hover:text-amber"
+        {/*
+          Marking a task done by hand is the one place the app takes your word over the
+          logs, so it asks first. Clearing an override is an undo and does not.
+        */}
+        {fromLogs ? (
+          <span
+            title="Completed in your logs"
+            className="grid size-6 place-items-center border border-moss/40 bg-moss/10 text-[11px] text-moss"
           >
-            Wiki
-          </a>
-        ) : null}
-
-        {/* Manual override: the only way to record progress the logs cannot reach. */}
-        <button
-          type="button"
-          title={isDone ? "Mark as not done" : "Mark as done"}
-          onClick={() => void setManualTask(task.id, isDone ? null : "finished")}
-          className={cx(
-            "grid size-6 cursor-pointer place-items-center border text-[11px] transition-colors",
-            isDone
-              ? "border-moss/60 bg-moss/15 text-moss hover:border-rust/60 hover:text-rust"
-              : "border-line-bright text-muted hover:border-moss hover:text-moss",
-          )}
-        >
-          {isDone ? "✓" : ""}
-        </button>
+            ✓
+          </span>
+        ) : confirming ? (
+          <span className="flex items-center gap-1">
+            <span className="data text-[10px] text-amber">Mark done?</span>
+            <button
+              type="button"
+              title="Yes, mark it done"
+              onClick={() => {
+                void setManualTask(task.id, "finished");
+                setConfirming(false);
+              }}
+              className="grid size-6 cursor-pointer place-items-center border border-moss bg-moss/20 text-[11px] text-moss"
+            >
+              ✓
+            </button>
+            <button
+              type="button"
+              title="Cancel"
+              onClick={() => setConfirming(false)}
+              className="grid size-6 cursor-pointer place-items-center border border-line-bright text-[11px] text-muted hover:text-bone"
+            >
+              ✕
+            </button>
+          </span>
+        ) : isDone ? (
+          <button
+            type="button"
+            title="You marked this done by hand — click to undo"
+            onClick={() => void setManualTask(task.id, null)}
+            className="grid size-6 cursor-pointer place-items-center border border-moss/60 bg-moss/15 text-[11px] text-moss hover:border-rust/60 hover:text-rust"
+          >
+            ✓
+          </button>
+        ) : (
+          <button
+            type="button"
+            title="Mark as done by hand"
+            onClick={() => setConfirming(true)}
+            className="grid size-6 cursor-pointer place-items-center border border-line-bright text-[11px] text-muted transition-colors hover:border-moss hover:text-moss"
+          />
+        )}
       </div>
     </li>
   );

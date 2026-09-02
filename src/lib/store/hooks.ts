@@ -137,18 +137,21 @@ export function useRaidActive(): boolean {
  */
 export function useProgressCounts() {
   const states = useTaskStates();
-  const availability = useAvailability();
   const tasks = useTasks();
 
   return useMemo(() => {
     const known = new Set(tasks.map((task) => task.id));
-    const { finished, started, manual, unmatched } = summarize(states, known);
-    let available = 0;
-    let locked = 0;
-    for (const entry of availability.values()) {
-      if (entry.status === "available") available += 1;
-      if (entry.status === "locked") locked += 1;
-    }
-    return { finished, started, manual, unmatched, available, locked, total: tasks.length };
-  }, [states, availability, tasks]);
+    const { finished, started, failed, manual, unmatched } = summarize(states, known);
+    return {
+      finished,
+      started,
+      failed,
+      manual,
+      unmatched,
+      // Everything the logs have never mentioned. Counted by subtraction rather than by
+      // asking whether a task is "available", which is not reliably knowable.
+      notStarted: Math.max(0, tasks.length - finished - started - failed),
+      total: tasks.length,
+    };
+  }, [states, tasks]);
 }

@@ -39,7 +39,7 @@ function RaidBanner() {
 }
 
 function ProgressBoard() {
-  const { finished, started, manual, unmatched, available, locked, total } = useProgressCounts();
+  const { finished, started, manual, unmatched, notStarted, total } = useProgressCounts();
   const pct = total > 0 ? Math.round((finished / total) * 100) : 0;
 
   return (
@@ -48,15 +48,15 @@ function ProgressBoard() {
         title="Progress"
         meta={total > 0 ? `${finished}/${total} tasks` : "no game data"}
       />
-      <div className="grid grid-cols-2 gap-6 px-4 py-5 sm:grid-cols-4">
+      {/*
+        No "available" figure here. It rested on the same availability guess the task
+        filters dropped, and a confident number that is sometimes wrong is worse than no
+        number. These three are read straight from the logs.
+      */}
+      <div className="grid grid-cols-3 gap-6 px-4 py-5">
         <Readout label="Completed" value={finished} tone="moss" />
         <Readout label="In progress" value={started} tone="amber" />
-        <Readout
-          label="Available"
-          value={available}
-          hint={available > 0 ? "ready to pick up" : undefined}
-        />
-        <Readout label="Locked" value={locked} tone="muted" />
+        <Readout label="Not started" value={notStarted} tone="muted" />
       </div>
 
       <div className="px-4 pb-5">
