@@ -32,7 +32,7 @@ export default function TasksPage() {
   const tasks = useTasks();
   const states = useTaskStates();
   const availability = useAvailability();
-  const maps = useMapsWithTasks();
+  const pickableMaps = useMapsWithTasks();
 
   const [filter, setFilter] = useState<Filter>("started");
   const [query, setQuery] = useState("");
@@ -50,30 +50,57 @@ export default function TasksPage() {
     return { started, finished, all: tasks.length };
   }, [tasks, states]);
 
-  const visible = useMemo(() => {
+  /** Everything passing the filters *except* the map, which the map options derive from. */
+  const beforeMapFilter = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return tasks
-      .filter((task) => {
-        const status = rowStatus(states.get(task.id));
-        if (filter !== "all" && status !== filter) return false;
-        if (kappaOnly && !task.kappaRequired) return false;
-        if (mapId && !taskIsOnMap(task, mapId)) return false;
-        if (needle && !task.name.toLowerCase().includes(needle)) {
-          const trader = task.trader?.name.toLowerCase() ?? "";
-          if (!trader.includes(needle)) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        // In progress first, then grouped by trader so a run follows who to hand in to.
-        const rank = (id: string) => (rowStatus(states.get(id)) === "started" ? 0 : 1);
-        return (
-          rank(a.id) - rank(b.id) ||
-          (a.trader?.name ?? "").localeCompare(b.trader?.name ?? "") ||
-          a.name.localeCompare(b.name)
-        );
-      });
-  }, [tasks, states, filter, query, mapId, kappaOnly]);
+    return tasks.filter((task) => {
+      const status = rowStatus(states.get(task.id));
+      if (filter !== "all" && status !== filter) return false;
+      if (kappaOnly && !task.kappaRequired) return false;
+      if (needle) {
+        const name = task.name.toLowerCase();
+        const trader = task.trader?.name.toLowerCase() ?? "";
+        if (!name.includes(needle) && !trader.includes(needle)) return false;
+      }
+      return true;
+    });
+  }, [tasks, states, filter, query, kappaOnly]);
+
+  /**
+   * Maps that still have something to show under the current filters, with a count.
+   *
+   * Derived from the already-filtered tasks so that picking any option always lands on
+   * at least one task — filter to In progress and you are offered only the maps you have
+   * something running on.
+   */
+  const mapOptions = useMemo(
+    () =>
+      pickableMaps
+        .map((map) => ({
+          map,
+          count: beforeMapFilter.reduce((n, task) => n + (taskIsOnMap(task, map.id) ? 1 : 0), 0),
+        }))
+        .filter((option) => option.count > 0),
+    [pickableMaps, beforeMapFilter],
+  );
+
+  // A map chosen under one filter may have nothing under the next. Ignore it rather than
+  // showing an empty list against a stale selection; it reapplies if the filter comes back.
+  const activeMapId = mapOptions.some((o) => o.map.id === mapId) ? mapId : "";
+
+  const visible = useMemo(() => {
+    const list = activeMapId
+      ? beforeMapFilter.filter((task) => taskIsOnMap(task, activeMapId))
+      : beforeMapFilter;
+    // In progress first, then grouped by trader so a run follows who to hand in to.
+    const rank = (id: string) => (rowStatus(states.get(id)) === "started" ? 0 : 1);
+    return [...list].sort(
+      (a, b) =>
+        rank(a.id) - rank(b.id) ||
+        (a.trader?.name ?? "").localeCompare(b.trader?.name ?? "") ||
+        a.name.localeCompare(b.name),
+    );
+  }, [beforeMapFilter, activeMapId, states]);
 
   if (tasks.length === 0) {
     return (
@@ -118,14 +145,15 @@ export default function TasksPage() {
               className="data w-52 border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone placeholder:text-muted focus:border-amber-dim focus:outline-none"
             />
             <select
-              value={mapId}
+              value={activeMapId}
               onChange={(e) => setMapId(e.target.value)}
+              title="Only maps with something to show under the current filters"
               className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
             >
-              <option value="">Any map</option>
-              {maps.map((map) => (
+              <option value="">Any map ({beforeMapFilter.length})</option>
+              {mapOptions.map(({ map, count }) => (
                 <option key={map.id} value={map.id}>
-                  {map.name}
+                  {map.name} ({count})
                 </option>
               ))}
             </select>
@@ -148,7 +176,11 @@ export default function TasksPage() {
 
       <Panel className="rise" style={{ animationDelay: "60ms" }}>
         <PanelHeader
-          title={mapId ? `Tasks · ${maps.find((m) => m.id === mapId)?.name}` : "Tasks"}
+          title={
+            activeMapId
+              ? `Tasks · ${mapOptions.find((o) => o.map.id === activeMapId)?.map.name}`
+              : "Tasks"
+          }
           meta={`${visible.length} of ${tasks.length}`}
         />
         {visible.length === 0 ? (
@@ -161,7 +193,7 @@ export default function TasksPage() {
                 task={task}
                 state={states.get(task.id)}
                 availability={availability.get(task.id)}
-                mapId={mapId || undefined}
+                mapId={activeMapId || undefined}
               />
             ))}
           </ul>
