@@ -57,6 +57,10 @@ interface StoredValues {
   tarkovBundle: CoreBundle;
   /** Names for the handful of items tasks reference. Loaded after the core bundle. */
   itemIndex: ItemIndex;
+  /** Squad you are currently in, if any. The token is also the invite. */
+  squadToken: string;
+  /** Who you appear as to squadmates. Random id, typed nickname. */
+  squadIdentity: { id: string; name: string };
 }
 
 type StoredKey = keyof StoredValues;

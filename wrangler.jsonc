@@ -10,7 +10,11 @@
   "assets": {
     "directory": "out",
     "binding": "ASSETS",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    // Assets are matched before the Worker, and an unmatched path is answered with the
+    // 404 page rather than falling through. These two prefixes have no asset behind them
+    // and must reach the Worker, so they are declared explicitly.
+    "run_worker_first": ["/api/*", "/j/*"]
   },
 
   "durable_objects": {

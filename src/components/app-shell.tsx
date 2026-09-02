@@ -6,12 +6,14 @@ import { useEffect, type ReactNode } from "react";
 
 import { useAppStore } from "@/lib/store/app-store";
 import { useCurrentMap, useRaidActive, useSelectedWipe } from "@/lib/store/hooks";
+import { SquadSync } from "./squad-sync";
 import { Lamp, cx } from "./ui";
 
 const NAV = [
   { href: "/", label: "Overview" },
   { href: "/tasks/", label: "Tasks" },
   { href: "/raid/", label: "Raid" },
+  { href: "/squad/", label: "Squad" },
   { href: "/settings/", label: "Settings" },
 ] as const;
 
@@ -140,6 +142,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
       </header>
+
+      {/* Headless: feeds log-derived progress to the squad room. */}
+      <SquadSync />
 
       <main className="flex-1 py-6">{children}</main>
 
