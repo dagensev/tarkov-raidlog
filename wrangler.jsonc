@@ -5,6 +5,14 @@
   "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
 
+  // A Custom Domain rather than a route: Cloudflare creates the DNS record and manages
+  // the certificate itself, which is what you want for a subdomain that is nothing but
+  // this Worker. A plain route would instead put the Worker in front of an existing
+  // record, and would need one to already exist.
+  //
+  // The zone has to live in the same Cloudflare account wrangler is logged into.
+  "routes": [{ "pattern": "tarkov-raidlog.seversoncloud.com", "custom_domain": true }],
+
   // The Next.js static export. Requests that match a file here are served straight from
   // Cloudflare's edge: free, unlimited, and they never invoke the Worker.
   "assets": {
