@@ -10,8 +10,7 @@ import { SquadSync } from "./squad-sync";
 import { Lamp, cx } from "./ui";
 
 const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/tasks/", label: "Tasks" },
+  { href: "/", label: "Tasks" },
   { href: "/raid/", label: "Raid" },
   { href: "/squad/", label: "Squad" },
   { href: "/settings/", label: "Settings" },

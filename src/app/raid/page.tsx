@@ -2,8 +2,9 @@
 
 import { useMemo } from 'react';
 
+import { Map3d } from '@/components/map-3d';
 import { TaskRow, rowStatus } from '@/components/task-row';
-import { EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { useAppStore } from '@/lib/store/app-store';
 import { useAvailability, useCurrentMap, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
 import { tarkovDevMapUrl, taskIsOnMap } from '@/lib/tarkovdev/maps';
@@ -130,6 +131,9 @@ export default function RaidPage() {
                 </div>
                 {map.description ? <p className='border-t border-line px-4 py-3 text-[12px] leading-relaxed text-muted'>{map.description}</p> : null}
             </Panel>
+
+            {/* Keyed on the map so the load state starts fresh when you switch. */}
+            <Map3d key={map.id} map={map} />
 
             {keys.length > 0 ? (
                 <Panel className='rise border-rust/30' style={{ animationDelay: '60ms' }}>

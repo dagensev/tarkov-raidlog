@@ -1,165 +1,213 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
+import { useMemo, useState } from "react";
 
-import { ConnectLogs } from '@/components/connect-logs';
-import { EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, Readout, cx } from '@/components/ui';
-import { useAppStore } from '@/lib/store/app-store';
-import { useCurrentMap, useProgressCounts, useRaidActive, useSelectedWipe, useTarkovData } from '@/lib/store/hooks';
+import { ConnectLogs } from "@/components/connect-logs";
+import { TaskRow, rowStatus } from "@/components/task-row";
+import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
+import {
+  useAvailability,
+  useMapsWithTasks,
+  useTaskStates,
+  useTasks,
+} from "@/lib/store/hooks";
+import { taskIsOnMap } from "@/lib/tarkovdev/maps";
 
-function RaidBanner() {
-    const inRaid = useRaidActive();
-    const map = useCurrentMap();
+/**
+ * Filters are log-derived only.
+ *
+ * There was a "Ready" filter built on computed availability. It was dropped because it
+ * could not be trusted: trader loyalty is not in the logs, 176 tasks carry event flags we
+ * do not evaluate, and 13 unlock on a timer we ignore. Showing a confident "ready" that is
+ * sometimes wrong is worse than not showing one.
+ */
+type Filter = "started" | "finished" | "all";
 
-    if (!inRaid) return null;
+const FILTERS: Array<{ id: Filter; label: string; title: string }> = [
+  { id: "started", label: "In progress", title: "Accepted and not yet handed in" },
+  { id: "finished", label: "Done", title: "Completed this wipe" },
+  { id: "all", label: "All", title: "Every task in the game" },
+];
 
-    return (
-        <Panel className='rise overflow-hidden border-amber/40'>
-            <div className='flex flex-wrap items-center justify-between gap-4 px-4 py-3'>
-                <div className='flex items-center gap-3'>
-                    <Lamp tone='amber' live />
-                    <span className='stencil text-[11px] text-amber'>In raid</span>
-                    <span className='text-lg text-bone'>{map?.name ?? 'Map not recognised'}</span>
-                </div>
-                <Link
-                    href='/raid/'
-                    className='stencil border border-amber px-3 py-1.5 text-[10px] text-amber transition-colors hover:bg-amber hover:text-ground'
-                >
-                    Open raid board
-                </Link>
-            </div>
-        </Panel>
+export default function TasksPage() {
+  const tasks = useTasks();
+  const states = useTaskStates();
+  const availability = useAvailability();
+  const pickableMaps = useMapsWithTasks();
+
+  const [filter, setFilter] = useState<Filter>("started");
+  const [query, setQuery] = useState("");
+  const [mapId, setMapId] = useState<string>("");
+  const [kappaOnly, setKappaOnly] = useState(false);
+
+  const counts = useMemo<Record<Filter, number>>(() => {
+    let started = 0;
+    let finished = 0;
+    for (const task of tasks) {
+      const status = rowStatus(states.get(task.id));
+      if (status === "started") started += 1;
+      if (status === "finished") finished += 1;
+    }
+    return { started, finished, all: tasks.length };
+  }, [tasks, states]);
+
+  /** Everything passing the filters *except* the map, which the map options derive from. */
+  const beforeMapFilter = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const status = rowStatus(states.get(task.id));
+      if (filter !== "all" && status !== filter) return false;
+      if (kappaOnly && !task.kappaRequired) return false;
+      if (needle) {
+        const name = task.name.toLowerCase();
+        const trader = task.trader?.name.toLowerCase() ?? "";
+        if (!name.includes(needle) && !trader.includes(needle)) return false;
+      }
+      return true;
+    });
+  }, [tasks, states, filter, query, kappaOnly]);
+
+  /**
+   * Maps that still have something to show under the current filters, with a count.
+   *
+   * Derived from the already-filtered tasks so that picking any option always lands on
+   * at least one task — filter to In progress and you are offered only the maps you have
+   * something running on.
+   */
+  const mapOptions = useMemo(
+    () =>
+      pickableMaps
+        .map((map) => ({
+          map,
+          count: beforeMapFilter.reduce((n, task) => n + (taskIsOnMap(task, map.id) ? 1 : 0), 0),
+        }))
+        .filter((option) => option.count > 0),
+    [pickableMaps, beforeMapFilter],
+  );
+
+  // A map chosen under one filter may have nothing under the next. Ignore it rather than
+  // showing an empty list against a stale selection; it reapplies if the filter comes back.
+  const activeMapId = mapOptions.some((o) => o.map.id === mapId) ? mapId : "";
+
+  const visible = useMemo(() => {
+    const list = activeMapId
+      ? beforeMapFilter.filter((task) => taskIsOnMap(task, activeMapId))
+      : beforeMapFilter;
+    // In progress first, then grouped by trader so a run follows who to hand in to.
+    const rank = (id: string) => (rowStatus(states.get(id)) === "started" ? 0 : 1);
+    return [...list].sort(
+      (a, b) =>
+        rank(a.id) - rank(b.id) ||
+        (a.trader?.name ?? "").localeCompare(b.trader?.name ?? "") ||
+        a.name.localeCompare(b.name),
     );
-}
+  }, [beforeMapFilter, activeMapId, states]);
 
-function ProgressBoard() {
-    const { finished, started, notStarted, total } = useProgressCounts();
-    const pct = total > 0 ? Math.round((finished / total) * 100) : 0;
-
+  if (tasks.length === 0) {
     return (
-        <Panel className='rise'>
-            <PanelHeader title='Progress' meta={total > 0 ? `${finished}/${total} tasks` : 'no game data'} />
-            {/*
-        No "available" figure here. It rested on the same availability guess the task
-        filters dropped, and a confident number that is sometimes wrong is worse than no
-        number. These three are read straight from the logs.
+      <div className="space-y-4">
+        <ConnectLogs />
+        <Panel>
+          <PanelHeader title="Tasks" meta="no game data" />
+          <EmptyNote>
+            Task data comes from tarkov.dev and has not loaded yet. Your log history is safe
+            either way.
+          </EmptyNote>
+        </Panel>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/*
+        The landing page, so it carries the one thing that has to happen before anything
+        works. Renders nothing once a folder is connected.
       */}
-            <div className='grid grid-cols-3 gap-6 px-4 py-5'>
-                <Readout label='Completed' value={finished} tone='moss' />
-                <Readout label='In progress' value={started} tone='amber' />
-                <Readout label='Not started' value={notStarted} tone='muted' />
-            </div>
+      <ConnectLogs />
+      <Panel className="rise">
+        <PanelHeader title="Filters" meta={`${visible.length} shown`} />
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+          {FILTERS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              title={option.title}
+              onClick={() => setFilter(option.id)}
+              className={cx(
+                "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
+                filter === option.id
+                  ? "border-amber bg-amber/15 text-amber"
+                  : "border-line-bright text-muted hover:text-bone-dim",
+              )}
+            >
+              {option.label}
+              <span className="data ml-2 text-[10px] opacity-60">{counts[option.id]}</span>
+            </button>
+          ))}
 
-            <div className='px-4 pb-5'>
-                <div className='mb-2 flex items-baseline justify-between'>
-                    <Label>Wipe completion</Label>
-                    <span className='data text-[11px] text-bone-dim'>{pct}%</span>
-                </div>
-                {/* Segmented bar: reads as a magazine of rounds rather than a progress meter. */}
-                <div className='flex gap-[2px]'>
-                    {Array.from({ length: 40 }, (_, i) => (
-                        <span key={i} className={cx('h-3 flex-1', i < Math.round((pct / 100) * 40) ? 'bg-amber' : 'bg-line')} />
-                    ))}
-                </div>
-            </div>
-        </Panel>
-    );
-}
-
-function WipePanel() {
-    const wipes = useAppStore((s) => s.wipes);
-    const wipe = useSelectedWipe();
-
-    if (!wipes || wipes.generations.length === 0) return null;
-
-    const fmt = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
-
-    return (
-        <Panel className='rise'>
-            <PanelHeader
-                title='Wipe detection'
-                meta={`${wipes.generations.length} profile${wipes.generations.length === 1 ? '' : 's'}`}
-                action={
-                    <Link href='/settings/' className='stencil text-[10px] text-muted transition-colors hover:text-amber'>
-                        Change
-                    </Link>
-                }
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tasks or traders"
+              className="data w-52 border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone placeholder:text-muted focus:border-amber-dim focus:outline-none"
             />
-            <ul className='divide-y divide-line'>
-                {wipes.generations.map((generation) => {
-                    const active = generation.id === wipe?.id;
-                    return (
-                        <li key={generation.id} className={cx('flex flex-wrap items-center gap-3 px-4 py-3', active && 'bg-amber/5')}>
-                            <Lamp tone={active ? 'amber' : 'muted'} />
-                            <span className='data text-[12px] text-bone'>
-                                {fmt(generation.firstSeenAt)} → {fmt(generation.lastSeenAt)}
-                            </span>
-                            <span className='data text-[11px] text-muted'>
-                                {generation.folders.length} session{generation.folders.length === 1 ? '' : 's'}
-                            </span>
-                            {generation.sessionModes.map((mode) => (
-                                <Pill key={mode} tone={mode === 'Pve' ? 'steel' : 'muted'}>
-                                    {mode}
-                                </Pill>
-                            ))}
-                            {active ? <Pill tone='amber'>current</Pill> : null}
-                        </li>
-                    );
-                })}
-            </ul>
-            <p className='border-t border-line px-4 py-2 text-[11px] text-muted'>
-                Wipes are told apart by profile ID. Progress from an older wipe is kept, just not counted.
-            </p>
-        </Panel>
-    );
-}
-
-function DataStatus() {
-    const data = useTarkovData();
-    const stale = useAppStore((s) => s.dataStale);
-    const error = useAppStore((s) => s.dataError);
-
-    if (data && !error && !stale) return null;
-
-    return (
-        <Panel className='rise'>
-            <PanelHeader title='Game data' meta={data ? 'cached' : 'unavailable'} />
-            <div className='space-y-2 px-4 py-4'>
-                {error ? (
-                    <p className='text-[13px] leading-relaxed text-bone-dim'>
-                        tarkov.dev did not answer: <span className='data text-[12px] text-rust'>{error}</span>
-                    </p>
-                ) : null}
-                <p className='text-[13px] leading-relaxed text-muted'>
-                    {data
-                        ? 'Showing the last copy saved on this machine. Task names and requirements may be out of date, but your progress is unaffected.'
-                        : 'Task names and requirements come from tarkov.dev. Without them Raidlog can still read your logs, but has nothing to match them against.'}
-                </p>
-            </div>
-        </Panel>
-    );
-}
-
-export default function OverviewPage() {
-    const logStatus = useAppStore((s) => s.logStatus);
-    const events = useAppStore((s) => s.events);
-
-    return (
-        <div className='space-y-4'>
-            <RaidBanner />
-            <ConnectLogs />
-            <DataStatus />
-
-            {logStatus === 'watching' || events.length > 0 ? (
-                <div className='grid gap-4 lg:grid-cols-[1.3fr_1fr]'>
-                    <ProgressBoard />
-                    <WipePanel />
-                </div>
-            ) : logStatus === 'scanning' ? (
-                <Panel>
-                    <EmptyNote>Reading your log folder…</EmptyNote>
-                </Panel>
-            ) : null}
+            <select
+              value={activeMapId}
+              onChange={(e) => setMapId(e.target.value)}
+              title="Only maps with something to show under the current filters"
+              className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
+            >
+              <option value="">Any map ({beforeMapFilter.length})</option>
+              {mapOptions.map(({ map, count }) => (
+                <option key={map.id} value={map.id}>
+                  {map.name} ({count})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setKappaOnly((v) => !v)}
+              title="Only tasks required for Kappa"
+              className={cx(
+                "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
+                kappaOnly
+                  ? "border-amber bg-amber/15 text-amber"
+                  : "border-line-bright text-muted hover:text-bone-dim",
+              )}
+            >
+              κ only
+            </button>
+          </div>
         </div>
-    );
+      </Panel>
+
+      <Panel className="rise" style={{ animationDelay: "60ms" }}>
+        <PanelHeader
+          title={
+            activeMapId
+              ? `Tasks · ${mapOptions.find((o) => o.map.id === activeMapId)?.map.name}`
+              : "Tasks"
+          }
+          meta={`${visible.length} of ${tasks.length}`}
+        />
+        {visible.length === 0 ? (
+          <EmptyNote>Nothing matches those filters.</EmptyNote>
+        ) : (
+          <ul>
+            {visible.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                state={states.get(task.id)}
+                availability={availability.get(task.id)}
+                mapId={activeMapId || undefined}
+              />
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </div>
+  );
 }
