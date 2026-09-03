@@ -11,7 +11,10 @@ import {
   useTaskStates,
   useTasks,
 } from "@/lib/store/hooks";
+import { useInSquad, useSquadHoldingCounts } from "@/lib/store/squad-hooks";
 import { taskIsOnMap } from "@/lib/tarkovdev/maps";
+import { mapOptions } from "@/lib/tasks/map-options";
+import { SORT_MODES, sharedWithSquad, sortTasks, type SortMode } from "@/lib/tasks/sort";
 
 /**
  * Filters are log-derived only.
@@ -34,11 +37,14 @@ export default function TasksPage() {
   const states = useTaskStates();
   const availability = useAvailability();
   const pickableMaps = useMapsWithTasks();
+  const squadHolders = useSquadHoldingCounts();
+  const inSquad = useInSquad();
 
   const [filter, setFilter] = useState<Filter>("started");
   const [query, setQuery] = useState("");
   const [mapId, setMapId] = useState<string>("");
   const [kappaOnly, setKappaOnly] = useState(false);
+  const [sort, setSort] = useState<SortMode>("progress");
 
   const counts = useMemo<Record<Filter, number>>(() => {
     let started = 0;
@@ -74,34 +80,43 @@ export default function TasksPage() {
    * at least one task — filter to In progress and you are offered only the maps you have
    * something running on.
    */
-  const mapOptions = useMemo(
-    () =>
-      pickableMaps
-        .map((map) => ({
-          map,
-          count: beforeMapFilter.reduce((n, task) => n + (taskIsOnMap(task, map.id) ? 1 : 0), 0),
-        }))
-        .filter((option) => option.count > 0),
+  const options = useMemo(
+    () => mapOptions(pickableMaps, beforeMapFilter),
     [pickableMaps, beforeMapFilter],
   );
 
   // A map chosen under one filter may have nothing under the next. Ignore it rather than
   // showing an empty list against a stale selection; it reapplies if the filter comes back.
-  const activeMapId = mapOptions.some((o) => o.map.id === mapId) ? mapId : "";
+  const activeMapId = options.some((o) => o.map.id === mapId) ? mapId : "";
 
-  const visible = useMemo(() => {
-    const list = activeMapId
-      ? beforeMapFilter.filter((task) => taskIsOnMap(task, activeMapId))
-      : beforeMapFilter;
-    // In progress first, then grouped by trader so a run follows who to hand in to.
-    const rank = (id: string) => (rowStatus(states.get(id)) === "started" ? 0 : 1);
-    return [...list].sort(
-      (a, b) =>
-        rank(a.id) - rank(b.id) ||
-        (a.trader?.name ?? "").localeCompare(b.trader?.name ?? "") ||
-        a.name.localeCompare(b.name),
-    );
-  }, [beforeMapFilter, activeMapId, states]);
+  // Sorting by what your squad is on says nothing while you are alone, so that option is
+  // offered only in a squad — and a selection left over from one is dropped, exactly as a
+  // stale map selection is.
+  const sortModes = useMemo(
+    () => SORT_MODES.filter((mode) => mode.id !== "squad" || inSquad),
+    [inSquad],
+  );
+  const activeSort = sortModes.some((mode) => mode.id === sort) ? sort : "progress";
+  const sortInputs = useMemo(() => ({ states, squadHolders }), [states, squadHolders]);
+
+  const matching = useMemo(
+    () =>
+      activeMapId
+        ? beforeMapFilter.filter((task) => taskIsOnMap(task, activeMapId))
+        : beforeMapFilter,
+    [beforeMapFilter, activeMapId],
+  );
+
+  const visible = useMemo(
+    () => sortTasks(matching, activeSort, sortInputs),
+    [matching, activeSort, sortInputs],
+  );
+
+  /** How many of the tasks on screen a squadmate is holding too. */
+  const sharedCount = useMemo(
+    () => matching.reduce((n, task) => n + (sharedWithSquad(task.id, sortInputs) ? 1 : 0), 0),
+    [matching, sortInputs],
+  );
 
   if (tasks.length === 0) {
     return (
@@ -160,9 +175,24 @@ export default function TasksPage() {
               className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
             >
               <option value="">Any map ({beforeMapFilter.length})</option>
-              {mapOptions.map(({ map, count }) => (
+              {options.map(({ map, count }) => (
                 <option key={map.id} value={map.id}>
                   {map.name} ({count})
+                </option>
+              ))}
+            </select>
+            <select
+              value={activeSort}
+              onChange={(e) => setSort(e.target.value as SortMode)}
+              aria-label="Sort order"
+              title={sortModes.find((mode) => mode.id === activeSort)?.title}
+              className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
+            >
+              {sortModes.map((mode) => (
+                <option key={mode.id} value={mode.id} title={mode.title}>
+                  {/* The squad option carries its count, since "none right now" is the
+                      answer often enough to be worth seeing before you pick it. */}
+                  {mode.id === "squad" ? `${mode.label} (${sharedCount})` : mode.label}
                 </option>
               ))}
             </select>
@@ -187,7 +217,7 @@ export default function TasksPage() {
         <PanelHeader
           title={
             activeMapId
-              ? `Tasks · ${mapOptions.find((o) => o.map.id === activeMapId)?.map.name}`
+              ? `Tasks · ${options.find((o) => o.map.id === activeMapId)?.map.name}`
               : "Tasks"
           }
           meta={`${visible.length} of ${tasks.length}`}

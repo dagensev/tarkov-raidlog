@@ -6,6 +6,8 @@ import { TaskRow } from '@/components/task-row';
 import { Button, EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { useAvailability, useCurrentMap, useMaps, useMapsWithTasks, useTaskStates, useTasks } from '@/lib/store/hooks';
 import { useSquadStore } from '@/lib/store/squad-store';
+import { taskIsOnMap } from '@/lib/tarkovdev/maps';
+import { mapOptions } from '@/lib/tasks/map-options';
 
 function StatusLamp() {
     const status = useSquadStore((s) => s.status);
@@ -153,26 +155,29 @@ function SharedTasks() {
     const [chosenMapId, setChosenMapId] = useState<string | null>(null);
     const mapId = chosenMapId ?? currentMap?.id ?? '';
 
-    const shared = useMemo(() => {
+    /** Everything the squad is doubled up on, before the dropdown narrows it to one map. */
+    const sharedAnywhere = useMemo(() => {
         if (members.length < 2) return [];
-        const byId = new Map(tasks.map((task) => [task.id, task]));
-
         return tasks
-            .map((task) => {
-                const holding = members.filter((m) => progress[m.id]?.[task.id] === 'started');
-                return { task, holding };
-            })
-            .filter(({ task, holding }) => {
-                if (holding.length < 2) return false;
-                if (!byId.has(task.id)) return false;
-                if (mapId) {
-                    const onMap = task.map?.id === mapId || task.objectives.some((o) => o.maps.some((m) => m.id === mapId));
-                    if (!onMap) return false;
-                }
-                return true;
-            })
+            .map((task) => ({ task, holding: members.filter((m) => progress[m.id]?.[task.id] === 'started') }))
+            .filter(({ holding }) => holding.length >= 2)
             .sort((a, b) => b.holding.length - a.holding.length || a.task.name.localeCompare(b.task.name));
-    }, [members, progress, tasks, mapId]);
+    }, [members, progress, tasks]);
+
+    /**
+     * Maps with something shared on them, counted — the same read the task list gives you,
+     * so the dropdown says where the squad has work rather than listing every map blindly.
+     */
+    // The detected map is kept listed even at zero, since it was selected for you.
+    const options = useMemo(
+        () => mapOptions(maps, sharedAnywhere.map(({ task }) => task), mapId),
+        [maps, sharedAnywhere, mapId],
+    );
+
+    const shared = useMemo(
+        () => (mapId ? sharedAnywhere.filter(({ task }) => taskIsOnMap(task, mapId)) : sharedAnywhere),
+        [sharedAnywhere, mapId],
+    );
 
     if (members.length < 2) {
         return (
@@ -194,10 +199,10 @@ function SharedTasks() {
                         onChange={(e) => setChosenMapId(e.target.value)}
                         className='data border border-line-bright bg-ground-2 px-2 py-1 text-[11px] text-bone focus:border-amber-dim focus:outline-none'
                     >
-                        <option value=''>Any map</option>
-                        {maps.map((map) => (
+                        <option value=''>Any map ({sharedAnywhere.length})</option>
+                        {options.map(({ map, count }) => (
                             <option key={map.id} value={map.id}>
-                                {map.name}
+                                {map.name} ({count})
                             </option>
                         ))}
                     </select>

@@ -183,3 +183,21 @@ export function squadHoldersOf(
     (member) => member.id !== you && state.progress[member.id]?.[taskId] === "started",
   );
 }
+
+/**
+ * Squadmates holding each task, by task id — the same rule as `squadHoldersOf`, counted
+ * across every task at once so a list can be sorted without a pass per row.
+ */
+export function squadHoldingCounts(
+  state: Pick<SquadState, "members" | "progress" | "identity">,
+): Map<string, number> {
+  const you = state.identity?.id;
+  const counts = new Map<string, number>();
+  for (const member of state.members) {
+    if (member.id === you) continue;
+    for (const [taskId, status] of Object.entries(state.progress[member.id] ?? {})) {
+      if (status === "started") counts.set(taskId, (counts.get(taskId) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
