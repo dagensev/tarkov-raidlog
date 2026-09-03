@@ -38,8 +38,6 @@ export class SquadRoom extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS members (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        faction TEXT,
-        level INTEGER,
         currentMap TEXT,
         updatedAt INTEGER NOT NULL
       );
@@ -113,18 +111,14 @@ export class SquadRoom extends DurableObject<Env> {
     const now = Date.now();
 
     this.sql.exec(
-      `INSERT INTO members (id, name, faction, level, currentMap, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO members (id, name, currentMap, updatedAt)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
-         faction = excluded.faction,
-         level = excluded.level,
          currentMap = excluded.currentMap,
          updatedAt = excluded.updatedAt`,
       member.id,
       member.name,
-      member.faction ?? null,
-      member.level ?? null,
       member.currentMap ?? null,
       now,
     );
@@ -149,7 +143,7 @@ export class SquadRoom extends DurableObject<Env> {
 
   private onPresence(
     ws: WebSocket,
-    update: { currentMap?: string; level?: number; faction?: string; name?: string },
+    update: { currentMap?: string; name?: string },
   ): void {
     const state = this.stateOf(ws);
     if (!state) return this.send(ws, { type: "error", message: "say hello first" });
@@ -157,14 +151,10 @@ export class SquadRoom extends DurableObject<Env> {
     this.sql.exec(
       `UPDATE members
          SET currentMap = COALESCE(?, currentMap),
-             level = COALESCE(?, level),
-             faction = COALESCE(?, faction),
              name = COALESCE(?, name),
              updatedAt = ?
        WHERE id = ?`,
       update.currentMap ?? null,
-      update.level ?? null,
-      update.faction ?? null,
       update.name ?? null,
       Date.now(),
       state.memberId,
@@ -234,8 +224,6 @@ export class SquadRoom extends DurableObject<Env> {
       .exec<{
         id: string;
         name: string;
-        faction: string | null;
-        level: number | null;
         currentMap: string | null;
         updatedAt: number;
       }>(`SELECT * FROM members ORDER BY name`)
@@ -243,8 +231,6 @@ export class SquadRoom extends DurableObject<Env> {
       .map<SquadMember>((row) => ({
         id: row.id,
         name: row.name,
-        faction: row.faction ?? undefined,
-        level: row.level ?? undefined,
         currentMap: row.currentMap ?? undefined,
         online: online.has(row.id),
         updatedAt: row.updatedAt,

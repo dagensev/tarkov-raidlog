@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 
+import { ItemIcon } from '@/components/item-icon';
 import { Map3d } from '@/components/map-3d';
 import { TaskRow, rowStatus } from '@/components/task-row';
 import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
@@ -62,7 +63,7 @@ export default function RaidPage() {
 
     /** Keys those tasks need on this map — the packing list. */
     const keys = useMemo(() => {
-        const collected = new Map<string, { name: string; short: string; wiki: string | null; tasks: string[] }>();
+        const collected = new Map<string, { name: string; short: string; icon: string | null; wiki: string | null; tasks: string[] }>();
         for (const task of holding) {
             for (const group of task.neededKeys) {
                 if (group.map && map && group.map.id !== map.id) continue;
@@ -73,6 +74,7 @@ export default function RaidPage() {
                         collected.set(key.id, {
                             name: key.name,
                             short: key.shortName ?? key.name,
+                            icon: key.iconLink ?? null,
                             wiki: key.wikiLink ?? null,
                             tasks: [task.name],
                         });
@@ -141,6 +143,8 @@ export default function RaidPage() {
                     <ul className='divide-y divide-line'>
                         {keys.map(([id, key]) => (
                             <li key={id} className='flex flex-wrap items-center gap-3 px-4 py-2.5'>
+                                {/* Bigger here than on a task row: this is the list you pack from. */}
+                                <ItemIcon src={key.icon} size={32} />
                                 <a
                                     href={key.wiki ?? undefined}
                                     target='_blank'

@@ -13,9 +13,6 @@ export interface SquadMember {
   /** Random id generated in the member's browser. Not derived from anything personal. */
   id: string;
   name: string;
-  /** `USEC` or `BEAR`, if they set one. */
-  faction?: string;
-  level?: number;
   /** tarkov.dev map id they were last seen loading into. */
   currentMap?: string;
   /** Whether a socket for this member is currently open. */
@@ -51,8 +48,6 @@ export interface ProgressMessage {
 export interface PresenceMessage {
   type: "presence";
   currentMap?: string;
-  level?: number;
-  faction?: string;
   name?: string;
 }
 

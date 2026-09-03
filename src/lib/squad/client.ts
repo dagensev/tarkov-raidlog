@@ -19,8 +19,6 @@ import type {
 export interface SquadIdentity {
   id: string;
   name: string;
-  faction?: string;
-  level?: number;
   currentMap?: string;
 }
 

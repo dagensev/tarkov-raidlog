@@ -8,6 +8,7 @@ import { objectiveAmount } from "@/lib/tarkovdev/objectives";
 import type { Task, TaskObjective } from "@/lib/tarkovdev/types";
 import { useAppStore } from "@/lib/store/app-store";
 import { useSquadHolders } from "@/lib/store/squad-hooks";
+import { ItemIcon } from "./item-icon";
 import { Pill, cx } from "./ui";
 
 /**
@@ -47,8 +48,9 @@ function KeyList({ task, mapId }: { task: Task; mapId?: string }) {
           target="_blank"
           rel="noreferrer"
           title={key.name}
-          className="data border border-rust/40 bg-rust/10 px-1.5 py-[1px] text-[10px] text-rust transition-colors hover:bg-rust hover:text-ground"
+          className="data inline-flex items-center gap-1 border border-rust/40 bg-rust/10 py-[1px] pr-1.5 pl-1 text-[10px] text-rust transition-colors hover:bg-rust hover:text-ground"
         >
+          <ItemIcon src={key.iconLink} size={14} />
           {key.shortName ?? key.name}
         </a>
       ))}
@@ -105,8 +107,6 @@ function Requires({ availability }: { availability: TaskAvailability }) {
         {reasons.map((reason, i) => (
           <li key={i} className="data text-[11px] text-muted">
             {reason.kind === "task" && `“${reason.taskName}” ${reason.need.join(" or ")}`}
-            {reason.kind === "level" && `Level ${reason.required} (you are ${reason.current})`}
-            {reason.kind === "faction" && `${reason.required} only`}
           </li>
         ))}
       </ul>
@@ -175,6 +175,14 @@ export function TaskRow({
           {task.kappaRequired ? <Pill tone="amber">κ</Pill> : null}
           {task.minPlayerLevel ? (
             <span className="data text-[10px] text-muted">Lv{task.minPlayerLevel}</span>
+          ) : null}
+          {/*
+            Twelve of the 491 tasks are locked to one side. Nothing here knows which side
+            you are — that is the point — so this states the task's requirement and leaves
+            the comparison to you.
+          */}
+          {task.factionName && task.factionName !== "Any" ? (
+            <Pill tone="steel">{task.factionName} only</Pill>
           ) : null}
           {state?.origin === "manual" ? <Pill tone="muted">by hand</Pill> : null}
         </div>

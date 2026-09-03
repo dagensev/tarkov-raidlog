@@ -82,7 +82,7 @@ async function createSquad(): Promise<string> {
   return body.token;
 }
 
-const member = (id: string, name: string) => ({ id, name, faction: "USEC", level: 20 });
+const member = (id: string, name: string) => ({ id, name });
 
 describe("squad API", () => {
   it("creates a squad with a usable token and invite link", async () => {

@@ -96,13 +96,11 @@ export function useTaskStates(): Map<string, TaskState> {
 export function useAvailability(): Map<string, TaskAvailability> {
   const tasks = useTasks();
   const states = useTaskStates();
-  const level = useAppStore((s) => s.settings.playerLevel);
-  const faction = useAppStore((s) => s.settings.faction);
   const traderLevels = useAppStore((s) => s.settings.traderLevels);
 
   return useMemo(
-    () => computeAvailability(tasks, states, { level, faction, traderLevels }),
-    [tasks, states, level, faction, traderLevels],
+    () => computeAvailability(tasks, states, { traderLevels }),
+    [tasks, states, traderLevels],
   );
 }
 

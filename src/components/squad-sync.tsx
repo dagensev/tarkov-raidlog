@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 
 import type { MemberProgress } from "@worker/protocol";
-import { useAppStore } from "@/lib/store/app-store";
 import { useCurrentMap, useTaskStates } from "@/lib/store/hooks";
 import { resumeSquad, useSquadStore } from "@/lib/store/squad-store";
 
@@ -22,8 +21,6 @@ export function SquadSync() {
 
   const states = useTaskStates();
   const currentMap = useCurrentMap();
-  const level = useAppStore((s) => s.settings.playerLevel);
-  const faction = useAppStore((s) => s.settings.faction);
 
   /** Last state we told the room about, so we can diff against it. */
   const published = useRef<MemberProgress>({});
@@ -54,8 +51,8 @@ export function SquadSync() {
 
   useEffect(() => {
     if (!token) return;
-    publishPresence({ currentMap: currentMap?.id, level, faction });
-  }, [token, currentMap?.id, level, faction, publishPresence]);
+    publishPresence({ currentMap: currentMap?.id });
+  }, [token, currentMap?.id, publishPresence]);
 
   return null;
 }

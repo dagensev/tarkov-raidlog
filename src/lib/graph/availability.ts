@@ -4,18 +4,20 @@ import type { Task, TaskRequirement } from "@/lib/tarkovdev/types";
 /**
  * Which tasks you can actually pick up right now.
  *
- * Ported from TarkovTracker's `tarkov-tracker/src/stores/progress.js` (`unlockedTasks`):
- * a task is available when it is not already done, every prerequisite stands as required,
- * the player level and trader levels are met, and the faction matches.
+ * Ported from TarkovTracker's `tarkov-tracker/src/stores/progress.js` (`unlockedTasks`),
+ * minus the halves of it we cannot honestly answer: a task is available when it is not
+ * already done, every prerequisite stands as required, and trader levels are met.
+ *
+ * TarkovTracker also gates on player level and faction, because it asks the player for
+ * both. This app does not ask, so it does not judge — the level a task wants and the side
+ * it is locked to are shown on the row as facts about the task, and you apply them.
  */
 
 export type AvailabilityStatus = "finished" | "failed" | "started" | "available" | "locked";
 
 export type LockReason =
   | { kind: "task"; taskId: string; taskName: string; need: string[]; actual: TaskStatus | "none" }
-  | { kind: "level"; required: number; current: number }
-  | { kind: "trader"; traderId: string; traderName: string; required: number; current?: number }
-  | { kind: "faction"; required: string; current: string };
+  | { kind: "trader"; traderId: string; traderName: string; required: number; current?: number };
 
 export interface TaskAvailability {
   taskId: string;
@@ -25,11 +27,7 @@ export interface TaskAvailability {
   unverified: boolean;
 }
 
-export type Faction = "USEC" | "BEAR";
-
 export interface PlayerContext {
-  level: number;
-  faction: Faction;
   /**
    * Loyalty level per trader id. Not derivable from the logs, so it is usually partial.
    * A trader with no entry is treated as satisfied and the task is flagged `unverified`
@@ -57,12 +55,6 @@ function requirementMet(
     // upstream; treat anything unrecognised as unmet rather than silently passing.
   }
   return false;
-}
-
-function factionMatches(task: Task, faction: Faction): boolean {
-  const required = task.factionName;
-  if (!required || required === "Any") return true;
-  return required.toUpperCase() === faction;
 }
 
 /** Work out the state of one task. */
@@ -93,11 +85,6 @@ export function evaluateTask(
     });
   }
 
-  const minLevel = task.minPlayerLevel ?? 0;
-  if (minLevel > player.level) {
-    reasons.push({ kind: "level", required: minLevel, current: player.level });
-  }
-
   for (const requirement of task.traderRequirements ?? []) {
     const current = player.traderLevels?.[requirement.trader.id];
     if (current === undefined) {
@@ -113,14 +100,6 @@ export function evaluateTask(
         current,
       });
     }
-  }
-
-  if (!factionMatches(task, player.faction)) {
-    reasons.push({
-      kind: "faction",
-      required: task.factionName ?? "Any",
-      current: player.faction,
-    });
   }
 
   // A task already in progress stays "started" even if a requirement now reads unmet —

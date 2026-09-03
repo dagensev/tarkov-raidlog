@@ -1,6 +1,5 @@
 import { openDB, type IDBPDatabase } from "idb";
 
-import type { Faction } from "@/lib/graph/availability";
 import type { LogEvent } from "@/lib/logs/events";
 import type { TaskStatus } from "@/lib/logs/progress";
 import type { CoreBundle, ItemIndex } from "@/lib/tarkovdev/client";
@@ -23,9 +22,6 @@ const DB_VERSION = 1;
 const STORE = "kv";
 
 export interface Settings {
-  /** Not derivable from the logs; the user sets it. */
-  playerLevel: number;
-  faction: Faction;
   /** Trader loyalty by trader id. Partial, and treated as "unverified" where missing. */
   traderLevels: Record<string, number>;
   /** Profile generation id chosen as the current wipe, or null to use auto-detection. */
@@ -39,8 +35,6 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  playerLevel: 1,
-  faction: "USEC",
   traderLevels: {},
   wipeId: null,
   mapOverride: null,

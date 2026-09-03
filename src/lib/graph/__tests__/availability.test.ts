@@ -34,7 +34,7 @@ function states(entries: Record<string, TaskState["status"]>): Map<string, TaskS
   );
 }
 
-const player: PlayerContext = { level: 20, faction: "USEC" };
+const player: PlayerContext = {};
 
 const req = (id: string, status: string[]): TaskRequirement => ({
   task: { id, name: id },
@@ -87,21 +87,15 @@ describe("evaluateTask", () => {
     expect(evaluateTask(subject, states({ a: "started" }), player).status).toBe("locked");
   });
 
-  it("locks on player level and says by how much", () => {
-    const result = evaluateTask(task("a", { minPlayerLevel: 30 }), states({}), player);
-    expect(result.reasons).toContainEqual({ kind: "level", required: 30, current: 20 });
-  });
-
-  it("locks on faction", () => {
-    const result = evaluateTask(task("a", { factionName: "BEAR" }), states({}), player);
-    expect(result.status).toBe("locked");
-    expect(result.reasons[0]).toMatchObject({ kind: "faction", required: "BEAR" });
-  });
-
-  it("treats `Any` faction as matching either side", () => {
-    expect(evaluateTask(task("a", { factionName: "Any" }), states({}), player).status).toBe(
-      "available",
-    );
+  it("does not gate on player level or faction, which it cannot know", () => {
+    // Neither is in the logs and this app no longer asks for them. Guessing would hide
+    // real tasks behind a level you may well have passed; the row states the requirement
+    // and leaves the judgement to the person who knows the answer.
+    for (const subject of [task("a", { minPlayerLevel: 99 }), task("b", { factionName: "BEAR" })]) {
+      const result = evaluateTask(subject, states({}), player);
+      expect(result.status, subject.id).toBe("available");
+      expect(result.reasons, subject.id).toEqual([]);
+    }
   });
 
   it("locks on an unmet trader level", () => {
@@ -126,7 +120,7 @@ describe("evaluateTask", () => {
 
   it("keeps a task you are holding out of the locked bucket", () => {
     // You already have it; telling you it is locked would be nonsense.
-    const subject = task("b", { taskRequirements: [req("a", ["complete"])], minPlayerLevel: 99 });
+    const subject = task("b", { taskRequirements: [req("a", ["complete"])] });
     expect(evaluateTask(subject, states({ b: "started" }), player).status).toBe("started");
   });
 
@@ -145,11 +139,10 @@ describe("evaluateTask", () => {
   it("collects every reason a task is locked, not just the first", () => {
     const subject = task("b", {
       taskRequirements: [req("a", ["complete"])],
-      minPlayerLevel: 40,
-      factionName: "BEAR",
+      traderRequirements: [{ trader: { id: "prapor", name: "Prapor" }, value: 3 }],
     });
-    const result = evaluateTask(subject, states({}), player);
-    expect(result.reasons.map((r) => r.kind).sort()).toEqual(["faction", "level", "task"]);
+    const result = evaluateTask(subject, states({}), { traderLevels: { prapor: 1 } });
+    expect(result.reasons.map((r) => r.kind).sort()).toEqual(["task", "trader"]);
   });
 });
 

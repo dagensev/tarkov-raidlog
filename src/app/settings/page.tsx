@@ -14,58 +14,6 @@ function fmt(ms: number): string {
     });
 }
 
-function PlayerPanel() {
-    const settings = useAppStore((s) => s.settings);
-    const update = useAppStore((s) => s.updateSettings);
-
-    return (
-        <Panel className='rise'>
-            <PanelHeader title='Character' meta='not in the logs' />
-            <div className='space-y-5 px-4 py-4'>
-                <p className='text-[13px] leading-relaxed text-muted'>
-                    The logs never state your own level or side — group notifications describe your squadmates, not you — so these two have to be set by hand.
-                    They gate which tasks count as available.
-                </p>
-
-                <div className='flex flex-wrap items-end gap-6'>
-                    <label className='flex flex-col gap-1.5'>
-                        <Label>Player level</Label>
-                        <input
-                            type='number'
-                            min={1}
-                            max={99}
-                            value={settings.playerLevel}
-                            onChange={(e) => void update({ playerLevel: Number(e.target.value) || 1 })}
-                            className='data w-24 border border-line-bright bg-ground-2 px-2 py-1.5 text-[14px] text-bone focus:border-amber-dim focus:outline-none'
-                        />
-                    </label>
-
-                    <div className='flex flex-col gap-1.5'>
-                        <Label>Faction</Label>
-                        <div className='flex'>
-                            {(['USEC', 'BEAR'] as const).map((faction) => (
-                                <button
-                                    key={faction}
-                                    type='button'
-                                    onClick={() => void update({ faction })}
-                                    className={cx(
-                                        'stencil cursor-pointer border px-4 py-1.5 text-[11px] transition-colors',
-                                        settings.faction === faction
-                                            ? 'border-amber bg-amber/15 text-amber'
-                                            : 'border-line-bright text-muted hover:text-bone-dim',
-                                    )}
-                                >
-                                    {faction}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </Panel>
-    );
-}
-
 function WipeSettings() {
     const wipes = useAppStore((s) => s.wipes);
     const settings = useAppStore((s) => s.settings);
@@ -217,7 +165,6 @@ export default function SettingsPage() {
         <div className='grid gap-4 lg:grid-cols-2'>
             <div className='space-y-4'>
                 <LogPanel />
-                <PlayerPanel />
             </div>
             <div className='space-y-4'>
                 <WipeSettings />

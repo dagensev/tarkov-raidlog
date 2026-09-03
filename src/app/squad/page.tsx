@@ -83,8 +83,8 @@ function JoinPanel() {
             </div>
             {error ? <p className='data border-t border-line px-4 py-2 text-[11px] text-rust'>{error}</p> : null}
             <p className='border-t border-line px-4 py-3 text-[12px] leading-relaxed text-muted'>
-                Your squad sees your nickname, level, faction, the map you are loading into, and which tasks you have done or are holding. Nothing else — not
-                your logs, not your account.
+                Your squad sees your nickname, the map you are loading into, and which tasks you have done or are holding. Nothing else — not your logs, not
+                your account.
             </p>
         </Panel>
     );
@@ -243,8 +243,6 @@ function Members() {
                                 {member.name}
                                 {member.id === identity?.id ? ' (you)' : ''}
                             </span>
-                            {member.faction ? <Pill tone='steel'>{member.faction}</Pill> : null}
-                            {member.level ? <span className='data text-[11px] text-muted'>Lv{member.level}</span> : null}
                             {map ? <Pill tone='amber'>{map.name}</Pill> : null}
                             {!member.online ? <span className='data ml-auto text-[10px] text-muted'>offline</span> : null}
                         </li>
