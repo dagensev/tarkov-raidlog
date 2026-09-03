@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import type { TaskAvailability } from "@/lib/graph/availability";
 import type { TaskState } from "@/lib/logs/progress";
-import type { Task } from "@/lib/tarkovdev/types";
+import { objectiveAmount } from "@/lib/tarkovdev/objectives";
+import type { Task, TaskObjective } from "@/lib/tarkovdev/types";
 import { useAppStore } from "@/lib/store/app-store";
 import { useSquadHolders } from "@/lib/store/squad-hooks";
 import { Pill, cx } from "./ui";
@@ -78,6 +79,17 @@ function SquadTag({ taskId }: { taskId: string }) {
           {member.name}
         </span>
       ))}
+    </span>
+  );
+}
+
+/** How many of a thing an objective wants — the part the description leaves out. */
+function Amount({ objective }: { objective: TaskObjective }) {
+  const amount = objectiveAmount(objective);
+  if (!amount) return null;
+  return (
+    <span className="data ml-1.5 border border-amber/40 bg-amber/10 px-1 py-[1px] text-[10px] whitespace-nowrap text-amber">
+      {amount}
     </span>
   );
 }
@@ -179,6 +191,7 @@ export function TaskRow({
                   <li key={objective.id} className="text-[12px] leading-snug text-bone-dim">
                     <span className="text-muted">— </span>
                     {objective.description}
+                    <Amount objective={objective} />
                     {objective.optional ? (
                       <span className="data ml-1 text-[10px] text-muted">optional</span>
                     ) : null}

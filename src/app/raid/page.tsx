@@ -54,25 +54,22 @@ export default function RaidPage() {
   const states = useTaskStates();
   const availability = useAvailability();
 
-  // Everything on this map you have not finished, rather than what we guess is
-  // "available" -- the same guess the task filters dropped as unreliable.
-  const onMap = useMemo(() => {
+  /**
+   * Tasks you are holding on this map — nothing else.
+   *
+   * Not-started tasks are a browsing question, answered on the tasks page. Loading into a
+   * raid is the moment for the list you can actually act on, and the unfinished list ran
+   * to dozens of entries you have not picked up from a trader yet.
+   */
+  const holding = useMemo(() => {
     if (!map) return [];
-    return tasks.filter((task) => {
-      if (rowStatus(states.get(task.id)) === "finished") return false;
-      return taskIsOnMap(task, map.id);
-    });
+    return tasks.filter(
+      (task) => rowStatus(states.get(task.id)) === "started" && taskIsOnMap(task, map.id),
+    );
   }, [tasks, states, map]);
 
-  /**
-   * Keys for tasks you are actually holding on this map — the packing list.
-   *
-   * Narrowed to in-progress rather than everything unfinished: the whole map's key list
-   * runs to a dozen or more and is a wishlist, not a bag you can carry. This answers
-   * "what do I need on me for the tasks I have right now".
-   */
+  /** Keys those tasks need on this map — the packing list. */
   const keys = useMemo(() => {
-    const holding = onMap.filter((task) => rowStatus(states.get(task.id)) === "started");
     const collected = new Map<string, { name: string; short: string; wiki: string | null; tasks: string[] }>();
     for (const task of holding) {
       for (const group of task.neededKeys) {
@@ -91,7 +88,7 @@ export default function RaidPage() {
       }
     }
     return [...collected.entries()].sort((a, b) => b[1].tasks.length - a[1].tasks.length);
-  }, [onMap, states, map]);
+  }, [holding, map]);
 
   if (!map) {
     return (
@@ -176,20 +173,15 @@ export default function RaidPage() {
       ) : null}
 
       <Panel className="rise" style={{ animationDelay: "120ms" }}>
-        <PanelHeader title="Unfinished here" meta={`${onMap.length} tasks`} />
-        {onMap.length === 0 ? (
+        <PanelHeader title="In progress here" meta={`${holding.length} tasks`} />
+        {holding.length === 0 ? (
           <EmptyNote>
-            Nothing left on {map.name}.
+            You are not holding any tasks with objectives on {map.name}. Pick some up from a
+            trader, or browse the full list on Tasks.
           </EmptyNote>
         ) : (
           <ul>
-            {[...onMap]
-              .sort(
-                (a, b) =>
-                  (rowStatus(states.get(a.id)) === "started" ? 0 : 1) -
-                  (rowStatus(states.get(b.id)) === "started" ? 0 : 1),
-              )
-              .map((task) => (
+            {holding.map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}
@@ -203,7 +195,7 @@ export default function RaidPage() {
       </Panel>
 
       <p className="px-1">
-        <Label>Objectives are filtered to this map — open a task to see its other steps</Label>
+        <Label>Objectives are filtered to this map — the wiki link has the rest</Label>
       </p>
     </div>
   );
