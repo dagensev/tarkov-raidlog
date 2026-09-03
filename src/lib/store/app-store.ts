@@ -83,6 +83,18 @@ interface AppState {
  */
 let watcher: LogWatcher | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Detaches the "tab became visible" catch-up read. Set while watching. */
+let stopVisibilityCatchUp: (() => void) | null = null;
+/** True while a read is in flight, so two triggers cannot read the same bytes twice. */
+let polling = false;
+
+/** Tear down both poll triggers together; leaving one attached would keep reading. */
+function stopPolling(): void {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  stopVisibilityCatchUp?.();
+  stopVisibilityCatchUp = null;
+}
 
 /**
  * A raid cannot outlast this, so a raid-start older than it is history, not a raid in
@@ -263,8 +275,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   stopWatching() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = null;
+    stopPolling();
   },
 }));
 
@@ -295,8 +306,7 @@ async function startWatching(
   set: SetState,
   get: GetState,
 ): Promise<void> {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = null;
+  stopPolling();
 
   set({ logStatus: "scanning", logError: null, scanProgress: null });
   watcher = new LogWatcher(new FileSystemAccessLogSource(handle));
@@ -319,28 +329,52 @@ async function startWatching(
     return;
   }
 
-  const interval = get().settings.pollIntervalMs;
-  pollTimer = setInterval(() => {
-    void (async () => {
-      if (!watcher) return;
-      try {
-        const fresh = await watcher.poll();
-        if (fresh.length === 0) return;
-        const events = [...get().events, ...fresh];
-        set({
-          events,
-          raid: raidFrom(fresh, get().raid),
-          sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
-        });
-        await db.set("events", events);
-      } catch (error) {
-        // A revoked permission or a folder that vanished mid-session.
-        set({ logStatus: "needs-permission", logError: (error as Error).message });
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    })();
-  }, interval);
+  /**
+   * Read whatever the game has written since the last read.
+   *
+   * The re-entrancy guard is not optional now that two things trigger this. A poll reads
+   * from the stored byte offset and only advances it once the bytes are in hand, so two
+   * overlapping runs would read the same range twice and append every event in it twice.
+   */
+  const pollOnce = async (): Promise<void> => {
+    if (!watcher || polling) return;
+    polling = true;
+    try {
+      const fresh = await watcher.poll();
+      if (fresh.length === 0) return;
+      const events = [...get().events, ...fresh];
+      set({
+        events,
+        raid: raidFrom(fresh, get().raid),
+        sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
+      });
+      await db.set("events", events);
+    } catch (error) {
+      // A revoked permission or a folder that vanished mid-session.
+      set({ logStatus: "needs-permission", logError: (error as Error).message });
+      stopPolling();
+    } finally {
+      polling = false;
+    }
+  };
+
+  pollTimer = setInterval(() => void pollOnce(), get().settings.pollIntervalMs);
+
+  /**
+   * Catch up the moment the tab is looked at again.
+   *
+   * Chrome throttles timers in hidden tabs to roughly once a minute, and Tarkov running
+   * fullscreen keeps this tab hidden for the whole raid — so the interval above is only
+   * really running at its stated rate while you can see the page. Nothing is lost either
+   * way, since the cursor is a byte offset and a late read just returns a bigger chunk,
+   * but without this you alt-tab to a board that is up to a throttled tick stale.
+   */
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "visible") void pollOnce();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  stopVisibilityCatchUp = () =>
+    document.removeEventListener("visibilitychange", onVisibilityChange);
 }
 
 export { denormalize, resolveGameMode };
