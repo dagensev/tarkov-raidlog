@@ -89,10 +89,16 @@ describe("resolveMap", () => {
     expect(resolveMap(MAPS, { scene: "maps/sandbox_start_preset.bundle" })?.id).toBe("m10");
   });
 
-  it("treats Night Factory as its own map", () => {
-    expect(resolveMap(MAPS, { scene: "maps/factory_night_preset.bundle" })?.name).toBe(
-      "Night Factory",
-    );
+  it("folds Night Factory into Factory", () => {
+    // Detection still matches the night bundle exactly; the fold is applied to the
+    // answer, so a night raid lands on the one Factory the pickers offer.
+    expect(resolveMap(MAPS, { scene: "maps/factory_night_preset.bundle" })?.id).toBe("m6");
+    expect(resolveMap(MAPS, { location: "factory4_night" })?.name).toBe("Factory");
+  });
+
+  it("leaves a fold alone when its target is not published", () => {
+    const nightOnly = [MAPS[6]];
+    expect(resolveMap(nightOnly, { scene: "maps/factory_night_preset.bundle" })?.id).toBe("m7");
   });
 
   it("resolves the location ids seen in real logs via nameId", () => {
@@ -186,6 +192,13 @@ describe("mapsWithTasks", () => {
     expect(names).toEqual(["Ground Zero"]);
     expect(names).not.toContain("Ground Zero 21+");
     expect(names).not.toContain("Ground Zero Tutorial");
+  });
+
+  it("never offers a folded map, even when something is assigned to it", () => {
+    // References are rewritten upstream so this should not arise, but the picker is the
+    // thing the user sees and it must not show two Factories whatever the data says.
+    const names = mapsWithTasks(MAPS, [task("t", "m6"), task("u", "m7")]).map((m) => m.name);
+    expect(names).toEqual(["Factory"]);
   });
 
   it("drops a map with no tasks at all", () => {

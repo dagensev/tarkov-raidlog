@@ -127,6 +127,31 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
     expect(orphaned.map((t) => t.name)).toEqual([]);
   });
 
+  it("shows Night Factory as Factory without stranding its tasks", () => {
+    const data = denormalize(bundle!);
+    const pickable = mapsWithTasks(data.maps, data.tasks);
+    expect(pickable.map((m) => m.name)).not.toContain("Night Factory");
+
+    // BSG assigns exactly one task to the night variant, and 4 of the 38 tasks with a
+    // Night Factory objective are not also tagged Factory. Folding the references is
+    // what keeps them under Factory; merely hiding the map would lose them.
+    const factory = pickable.find((m) => m.name === "Factory");
+    expect(factory).toBeDefined();
+    const nightOnly = data.tasks.find((t) => t.normalizedName === "health-care-privacy-part-5");
+    expect(nightOnly?.map?.name).toBe("Factory");
+    expect(taskIsOnMap(nightOnly!, factory!.id)).toBe(true);
+
+    // No task still points at the folded map.
+    const nightMap = data.maps.find((m) => m.normalizedName === "night-factory");
+    expect(nightMap).toBeDefined();
+    expect(data.tasks.filter((t) => taskIsOnMap(t, nightMap!.id))).toEqual([]);
+
+    // Detection still recognises the night bundle exactly; it just answers with Factory.
+    expect(resolveMap(data.maps, { scene: "maps/factory_night_preset.bundle" })?.name).toBe(
+      "Factory",
+    );
+  });
+
   it("reports what the live API returned", () => {
     const data = denormalize(bundle!);
     const keys = referencedItemIds(bundle!.tasks).length;

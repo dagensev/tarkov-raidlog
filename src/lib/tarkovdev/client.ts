@@ -15,6 +15,7 @@ import type {
   RawTradersData,
   TranslationDictionary,
 } from "./raw-types";
+import { foldedMapIds } from "./maps";
 import type { GameMap, ItemRef, NamedRef, TarkovData, Task, TaskObjective } from "./types";
 
 /** Thrown when the API answers but the answer is not usable. */
@@ -244,10 +245,15 @@ function makeResolver(bundle: CoreBundle) {
   const t = (key: string | null | undefined, fallback = ""): string =>
     (key ? (text[key] ?? key) : fallback) || fallback;
 
+  // Night Factory is Factory after dark. Rewriting the reference here — rather than
+  // filtering the picker — is what keeps its tasks reachable under Factory.
+  const folded = foldedMapIds(Object.values(bundle.maps));
+
   const mapRef = (id: string | null | undefined): NamedRef | null => {
     if (!id) return null;
-    const map = bundle.maps[id];
-    return { id, name: map ? t(map.name, map.normalizedName) : id };
+    const shownAs = folded.get(id) ?? id;
+    const map = bundle.maps[shownAs];
+    return { id: shownAs, name: map ? t(map.name, map.normalizedName) : shownAs };
   };
 
   const traderRef = (id: string | null | undefined): NamedRef | null => {
