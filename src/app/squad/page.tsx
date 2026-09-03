@@ -2,8 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { TaskRow } from "@/components/task-row";
 import { Button, EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from "@/components/ui";
-import { useCurrentMap, useMaps, useMapsWithTasks, useTasks } from "@/lib/store/hooks";
+import {
+  useAvailability,
+  useCurrentMap,
+  useMaps,
+  useMapsWithTasks,
+  useTaskStates,
+  useTasks,
+} from "@/lib/store/hooks";
 import { useSquadStore } from "@/lib/store/squad-store";
 
 function StatusLamp() {
@@ -150,8 +158,9 @@ function InvitePanel() {
 function SharedTasks() {
   const members = useSquadStore((s) => s.members);
   const progress = useSquadStore((s) => s.progress);
-  const identity = useSquadStore((s) => s.identity);
   const tasks = useTasks();
+  const states = useTaskStates();
+  const availability = useAvailability();
   const maps = useMapsWithTasks();
   const currentMap = useCurrentMap();
   // Null means "follow the detected map"; picking anything, including Any map, sticks.
@@ -218,29 +227,17 @@ function SharedTasks() {
           Nothing your squad is working on together{mapId ? " on this map" : ""} right now.
         </EmptyNote>
       ) : (
-        <ul className="divide-y divide-line">
-          {shared.map(({ task, holding }) => (
-            <li key={task.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
-              <a
-                href={task.wikiLink ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[14px] text-bone underline decoration-line-bright underline-offset-4 hover:text-amber"
-              >
-                {task.name}
-              </a>
-              {task.trader ? (
-                <span className="data text-[11px] text-bone-dim">{task.trader.name}</span>
-              ) : null}
-              {task.map ? <Pill tone="steel">{task.map.name}</Pill> : null}
-              <span className="ml-auto flex flex-wrap gap-1">
-                {holding.map((member) => (
-                  <Pill key={member.id} tone={member.id === identity?.id ? "amber" : "moss"}>
-                    {member.id === identity?.id ? "you" : member.name}
-                  </Pill>
-                ))}
-              </span>
-            </li>
+        // The same row the task list uses, so objectives, keys and the wiki link are all
+        // here. Who else is holding it comes from the squad tag inside the row.
+        <ul>
+          {shared.map(({ task }) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              state={states.get(task.id)}
+              availability={availability.get(task.id)}
+              mapId={mapId || undefined}
+            />
           ))}
         </ul>
       )}

@@ -167,3 +167,19 @@ export function resumeSquad(): void {
   const state = useSquadStore.getState();
   if (state.token && !client) connect(useSquadStore.setState, useSquadStore.getState);
 }
+
+/**
+ * Squadmates holding a given task, excluding you.
+ *
+ * Read from the store inside `TaskRow` rather than threaded down as a prop: task rows
+ * appear on three pages, and only one of them knows anything about squads.
+ */
+export function squadHoldersOf(
+  taskId: string,
+  state: Pick<SquadState, "members" | "progress" | "identity">,
+): SquadMember[] {
+  const you = state.identity?.id;
+  return state.members.filter(
+    (member) => member.id !== you && state.progress[member.id]?.[taskId] === "started",
+  );
+}

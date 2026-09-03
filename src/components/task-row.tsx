@@ -6,6 +6,7 @@ import type { TaskAvailability } from "@/lib/graph/availability";
 import type { TaskState } from "@/lib/logs/progress";
 import type { Task } from "@/lib/tarkovdev/types";
 import { useAppStore } from "@/lib/store/app-store";
+import { useSquadHolders } from "@/lib/store/squad-hooks";
 import { Pill, cx } from "./ui";
 
 /**
@@ -51,6 +52,33 @@ function KeyList({ task, mapId }: { task: Task; mapId?: string }) {
         </a>
       ))}
     </div>
+  );
+}
+
+/**
+ * Squadmates holding this task too.
+ *
+ * Read from the squad store here rather than passed in: task rows appear on three pages
+ * and only one of them knows anything about squads. Renders nothing when you are alone,
+ * so the row is unchanged for a solo player.
+ */
+function SquadTag({ taskId }: { taskId: string }) {
+  const holders = useSquadHolders(taskId);
+  if (holders.length === 0) return null;
+
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      <span className="stencil text-[9px] text-moss">Squad</span>
+      {holders.map((member) => (
+        <span
+          key={member.id}
+          title={`${member.name} is also holding this`}
+          className="data border border-moss/40 bg-moss/10 px-1.5 py-[1px] text-[10px] text-moss"
+        >
+          {member.name}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -141,6 +169,7 @@ export function TaskRow({
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <KeyList task={task} mapId={mapId} />
+          <SquadTag taskId={task.id} />
         </div>
 
         <div className="mt-2 space-y-2 border-l border-line-bright pl-3">

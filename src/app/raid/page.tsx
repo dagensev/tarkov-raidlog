@@ -64,10 +64,17 @@ export default function RaidPage() {
     });
   }, [tasks, states, map]);
 
-  // Keys for this map across every task you could be working — the pre-raid packing list.
+  /**
+   * Keys for tasks you are actually holding on this map — the packing list.
+   *
+   * Narrowed to in-progress rather than everything unfinished: the whole map's key list
+   * runs to a dozen or more and is a wishlist, not a bag you can carry. This answers
+   * "what do I need on me for the tasks I have right now".
+   */
   const keys = useMemo(() => {
+    const holding = onMap.filter((task) => rowStatus(states.get(task.id)) === "started");
     const collected = new Map<string, { name: string; short: string; wiki: string | null; tasks: string[] }>();
-    for (const task of onMap) {
+    for (const task of holding) {
       for (const group of task.neededKeys) {
         if (group.map && map && group.map.id !== map.id) continue;
         for (const key of group.keys) {
@@ -84,7 +91,7 @@ export default function RaidPage() {
       }
     }
     return [...collected.entries()].sort((a, b) => b[1].tasks.length - a[1].tasks.length);
-  }, [onMap, map]);
+  }, [onMap, states, map]);
 
   if (!map) {
     return (
@@ -146,7 +153,7 @@ export default function RaidPage() {
 
       {keys.length > 0 ? (
         <Panel className="rise border-rust/30" style={{ animationDelay: "60ms" }}>
-          <PanelHeader title="Bring these keys" meta={`${keys.length}`} />
+          <PanelHeader title="Bring these keys" meta={`${keys.length} · tasks in progress`} />
           <ul className="divide-y divide-line">
             {keys.map(([id, key]) => (
               <li key={id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
