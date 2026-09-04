@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { LogEvent } from "@/lib/logs/events";
+import { trailFrom } from "@/lib/logs/screenshots";
+import { MemoryScreenshotSource } from "@/lib/logs/screenshot-source";
 import { RAID_ACTIVE_WINDOW_MS, isRaidActive, type RaidState } from "../app-store";
 
 /**
@@ -82,5 +84,31 @@ describe("raid state ordering", () => {
       event("game-started", Date.UTC(2026, 8, 2, 18, 54, 13)),
     ];
     expect(__testRaidFrom(events, { active: false, at: 0 }).active).toBe(false);
+  });
+});
+
+describe("screenshot trail", () => {
+  const raidAt = new Date(2026, 8, 3, 18, 10).getTime();
+  const shot = (hour: number, minute: number, x: number) =>
+    `2026-09-03[${String(hour).padStart(2, "0")}-${String(minute).padStart(2, "0")}]_` +
+    `${x.toFixed(2)}, 2.58, -24.30_0.00000, 0.79692, 0.00000, 0.60408_16.86 (0).png`;
+
+  it("derives this raid's trail from a directory listing", async () => {
+    const source = new MemoryScreenshotSource([shot(17, 0, 1), shot(18, 20, 2)]);
+    const trail = trailFrom(await source.list(), raidAt);
+    expect(trail.map((s) => s.x)).toEqual([2]);
+  });
+
+  it("grows as screenshots are taken, without accumulating state", async () => {
+    const source = new MemoryScreenshotSource([shot(18, 20, 1)]);
+    expect(trailFrom(await source.list(), raidAt)).toHaveLength(1);
+    source.add(shot(18, 25, 2));
+    expect(trailFrom(await source.list(), raidAt)).toHaveLength(2);
+  });
+
+  it("empties when a later raid starts, with no explicit reset", async () => {
+    const source = new MemoryScreenshotSource([shot(18, 20, 1)]);
+    const laterRaid = new Date(2026, 8, 3, 19, 0).getTime();
+    expect(trailFrom(await source.list(), laterRaid)).toEqual([]);
   });
 });

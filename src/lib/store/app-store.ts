@@ -10,6 +10,12 @@ import {
   requestPermission,
 } from "@/lib/logs/fs-access-source";
 import type { TaskStatus } from "@/lib/logs/progress";
+import { type ScreenshotPosition, trailFrom } from "@/lib/logs/screenshots";
+import {
+  FileSystemAccessScreenshotSource,
+  pickScreenshotDirectory,
+  type ScreenshotSource,
+} from "@/lib/logs/screenshot-source";
 import { LogWatcher, type ScanProgress } from "@/lib/logs/watcher";
 import { analyzeWipes, type WipeAnalysis } from "@/lib/logs/wipe";
 import {
@@ -62,6 +68,11 @@ interface AppState {
   logError: string | null;
   scanProgress: ScanProgress | null;
 
+  screenshotStatus: LogStatus;
+  screenshotError: string | null;
+  /** This raid's screenshots, oldest first. Derived each poll, never accumulated. */
+  trail: ScreenshotPosition[];
+
   events: LogEvent[];
   wipes: WipeAnalysis | null;
   manualTasks: Record<string, TaskStatus>;
@@ -99,6 +110,8 @@ interface AppState {
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
+  connectScreenshots: () => Promise<void>;
+  reconnectScreenshots: () => Promise<void>;
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
   setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
@@ -114,6 +127,11 @@ interface AppState {
  */
 let watcher: LogWatcher | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Kept out of reactive state for the same reason the watcher is: this is a handle, not
+ * something the UI renders, and putting it in the store would re-render on every poll.
+ */
+let screenshots: ScreenshotSource | null = null;
 /** Detaches the "tab became visible" catch-up read. Set while watching. */
 let stopVisibilityCatchUp: (() => void) | null = null;
 /** True while a read is in flight, so two triggers cannot read the same bytes twice. */
@@ -199,6 +217,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionMode: null,
 
   raid: { active: false, at: 0 },
+  screenshotStatus: "idle",
+  screenshotError: null,
+  trail: [],
   mapFilter: null,
   taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
 
@@ -233,6 +254,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    const shots = await db.get("screenshotDirectory");
+    if (shots) {
+      const permission = await checkPermission(shots);
+      if (permission === "granted") {
+        screenshots = new FileSystemAccessScreenshotSource(shots);
+        set({ screenshotStatus: "watching" });
+      } else {
+        set({ screenshotStatus: "needs-permission" });
+      }
+    }
+
     void get().refreshData();
   },
 
@@ -259,6 +291,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     await startWatching(handle, set, get);
+  },
+
+  async connectScreenshots() {
+    try {
+      const handle = await pickScreenshotDirectory();
+      await db.set("screenshotDirectory", handle);
+      screenshots = new FileSystemAccessScreenshotSource(handle);
+      set({ screenshotStatus: "watching", screenshotError: null });
+      await readTrail(set, get);
+    } catch (error) {
+      if ((error as DOMException)?.name === "AbortError") return;
+      set({ screenshotStatus: "error", screenshotError: (error as Error).message });
+    }
+  },
+
+  async reconnectScreenshots() {
+    const handle = await db.get("screenshotDirectory");
+    if (!handle) return get().connectScreenshots();
+    const permission = await requestPermission(handle);
+    if (permission !== "granted") {
+      set({ screenshotStatus: "needs-permission" });
+      return;
+    }
+    screenshots = new FileSystemAccessScreenshotSource(handle);
+    set({ screenshotStatus: "watching", screenshotError: null });
+    await readTrail(set, get);
   },
 
   async rescan() {
@@ -342,6 +400,23 @@ async function loadItems(bundle: CoreBundle, set: SetState): Promise<void> {
   }
 }
 
+/**
+ * Re-derive the trail from the screenshots folder.
+ *
+ * A listing, not a read: the position is in the file name, so this never opens a file and
+ * costs the same whether the folder holds five screenshots or five thousand.
+ */
+async function readTrail(set: SetState, get: GetState): Promise<void> {
+  if (!screenshots) return;
+  try {
+    set({ trail: trailFrom(await screenshots.list(), get().raid.at) });
+  } catch (error) {
+    // The folder was moved, or permission lapsed while the tab was open.
+    screenshots = null;
+    set({ screenshotStatus: "needs-permission", screenshotError: (error as Error).message });
+  }
+}
+
 async function startWatching(
   handle: FileSystemDirectoryHandle,
   set: SetState,
@@ -382,14 +457,18 @@ async function startWatching(
     polling = true;
     try {
       const fresh = await watcher.poll();
-      if (fresh.length === 0) return;
-      const events = [...get().events, ...fresh];
-      set({
-        events,
-        raid: raidFrom(fresh, get().raid),
-        sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
-      });
-      await db.set("events", events);
+      if (fresh.length > 0) {
+        const events = [...get().events, ...fresh];
+        set({
+          events,
+          raid: raidFrom(fresh, get().raid),
+          sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
+        });
+        await db.set("events", events);
+      }
+      // After the raid state is up to date, so a raid that just started empties the trail
+      // in the same tick rather than showing the previous raid's dots for one poll.
+      if (get().raid.active) await readTrail(set, get);
     } catch (error) {
       // A revoked permission or a folder that vanished mid-session.
       set({ logStatus: "needs-permission", logError: (error as Error).message });

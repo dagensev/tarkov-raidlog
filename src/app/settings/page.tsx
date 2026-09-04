@@ -105,6 +105,42 @@ function LogPanel() {
     );
 }
 
+function ScreenshotPanel() {
+    const status = useAppStore((s) => s.screenshotStatus);
+    const error = useAppStore((s) => s.screenshotError);
+    const connect = useAppStore((s) => s.connectScreenshots);
+    const reconnect = useAppStore((s) => s.reconnectScreenshots);
+
+    return (
+        <Panel className='rise' style={{ animationDelay: '90ms' }}>
+            <PanelHeader
+                title='Screenshot link'
+                meta={status === 'watching' ? 'connected' : status === 'needs-permission' ? 'permission lapsed' : 'not connected'}
+            />
+            <div className='space-y-3 px-4 py-4'>
+                <p className='text-[13px] leading-relaxed text-bone-dim'>
+                    The game writes where you were standing into the name of every screenshot it saves. Point Raidlog at your{' '}
+                    <span className='data text-bone'>Screenshots</span> folder and pressing the screenshot key in raid puts you on the map.
+                </p>
+                <p className='text-[13px] leading-relaxed text-muted'>
+                    Usually <span className='data'>Documents\Escape from Tarkov\Screenshots</span>. The game only creates it once you have taken your
+                    first screenshot, so take one in raid if it is not there yet.
+                </p>
+                {status === 'needs-permission' ? (
+                    <Button variant='primary' onClick={() => void reconnect()}>
+                        Reconnect screenshots
+                    </Button>
+                ) : (
+                    <Button variant={status === 'watching' ? 'ghost' : 'primary'} onClick={() => void connect()}>
+                        {status === 'watching' ? 'Pick a different folder' : 'Connect screenshots'}
+                    </Button>
+                )}
+                {error ? <p className='data text-[11px] text-rust'>{error}</p> : null}
+            </div>
+        </Panel>
+    );
+}
+
 function DataPanel() {
     const refresh = useAppStore((s) => s.refreshData);
     const update = useAppStore((s) => s.updateSettings);
@@ -165,6 +201,7 @@ export default function SettingsPage() {
         <div className='grid gap-4 lg:grid-cols-2'>
             <div className='space-y-4'>
                 <LogPanel />
+                <ScreenshotPanel />
             </div>
             <div className='space-y-4'>
                 <WipeSettings />
