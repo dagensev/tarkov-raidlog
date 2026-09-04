@@ -40,10 +40,14 @@ export function objectivePins(
 
   for (const task of tasks) {
     for (const objective of task.objectives) {
-      for (const zone of objective.zones) {
+      // tarkov.dev reuses one zone.id across several entries to express candidate spots for
+      // the same zone (e.g. 19 "Wrong_wheels" zones, one per position), so zone.id alone isn't
+      // unique within an objective. Fold in the zone's index to keep keys distinct; zone.id
+      // stays in the key too, for readability when debugging.
+      for (const [zoneIndex, zone] of objective.zones.entries()) {
         if (shownAs(zone.map) !== mapId) continue;
         pins.push({
-          key: `${objective.id}:zone:${zone.id}`,
+          key: `${objective.id}:zone:${zoneIndex}:${zone.id}`,
           taskId: task.id,
           taskName: task.name,
           objectiveId: objective.id,
@@ -54,11 +58,15 @@ export function objectivePins(
         });
       }
 
+      // A counter that runs across every possibleLocations entry, not one that resets per
+      // entry: an objective can have several entries on the same map, and an index restarted
+      // per entry would collide with itself.
+      let locationIndex = 0;
       for (const entry of objective.possibleLocations) {
         if (shownAs(entry.map) !== mapId) continue;
-        entry.positions.forEach((position, index) => {
+        for (const position of entry.positions) {
           pins.push({
-            key: `${objective.id}:loc:${entry.map}:${index}`,
+            key: `${objective.id}:loc:${entry.map}:${locationIndex}`,
             taskId: task.id,
             taskName: task.name,
             objectiveId: objective.id,
@@ -67,7 +75,8 @@ export function objectivePins(
             position,
             outline: null,
           });
-        });
+          locationIndex++;
+        }
       }
     }
   }

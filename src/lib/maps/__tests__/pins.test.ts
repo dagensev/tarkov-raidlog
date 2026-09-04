@@ -114,4 +114,39 @@ describe("objectivePins", () => {
     const tasks = [task("t1", "Task One", [objective("o1", "Hand it over", [])])];
     expect(objectivePins(tasks, "customs", new Map())).toEqual([]);
   });
+
+  it("keeps zones distinct when tarkov.dev reuses one zone.id for several positions", () => {
+    // Real data: objective 673f5065cdfe082966842575 has 19 zones all with id "Wrong_wheels",
+    // each at a different position. zone.id alone can't tell them apart.
+    const reused = {
+      ...zone("customs", 1),
+      id: "Wrong_wheels",
+    };
+    const alsoReused = {
+      ...zone("customs", 2),
+      id: "Wrong_wheels",
+    };
+    const tasks = [task("t1", "Task One", [objective("o1", "Plant it", [reused, alsoReused])])];
+    const pins = objectivePins(tasks, "customs", new Map());
+    expect(pins).toHaveLength(2);
+    const keys = pins.map((pin) => pin.key);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it("keeps locations distinct across several possibleLocations entries on the same map", () => {
+    // Real data: objective 6391d9ba4b15ca31f76bc325 has 3 possibleLocations entries all on
+    // Woods. An index restarted per entry collides with the other entries' indices.
+    const tasks = [
+      task("t1", "Task One", [
+        objective("o1", "Find it", [], [
+          { map: "customs", positions: [position(1), position(2)] },
+          { map: "customs", positions: [position(3), position(4)] },
+        ]),
+      ]),
+    ];
+    const pins = objectivePins(tasks, "customs", new Map());
+    expect(pins).toHaveLength(4);
+    const keys = pins.map((pin) => pin.key);
+    expect(new Set(keys).size).toBe(4);
+  });
 });
