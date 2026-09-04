@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import type { ScreenshotPosition } from "@/lib/logs/screenshots";
 import { calibrationFor, type MapFloor } from "@/lib/maps/calibration";
+import type { ObjectivePin } from "@/lib/maps/pins";
+import { project } from "@/lib/maps/project";
 import type { GameMap } from "@/lib/tarkovdev/types";
 import { Panel, cx } from "./ui";
 
@@ -41,7 +44,20 @@ function prepare(text: string, baseLayer: string, activeFloor: MapFloor | null):
   return svg as SVGSVGElement;
 }
 
-export function ObjectiveMap({ map }: { map: GameMap }) {
+export function ObjectiveMap({
+  map,
+  pins,
+  trail,
+  showPins,
+  onTogglePins,
+}: {
+  map: GameMap;
+  pins: readonly ObjectivePin[];
+  /** This raid's screenshots, oldest first. Empty on browsers with no File System Access. */
+  trail: readonly ScreenshotPosition[];
+  showPins: boolean;
+  onTogglePins: () => void;
+}) {
   const calibration = calibrationFor(map);
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -112,6 +128,19 @@ export function ObjectiveMap({ map }: { map: GameMap }) {
             ) : null}
             <button
               type="button"
+              onClick={onTogglePins}
+              title={showPins ? "Hide objective pins" : "Show objective pins"}
+              className={cx(
+                "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
+                showPins
+                  ? "border-amber text-amber"
+                  : "border-line-bright text-muted hover:border-amber hover:text-amber",
+              )}
+            >
+              {pins.length} pins
+            </button>
+            <button
+              type="button"
               onClick={() => setZoomed((v) => !v)}
               title={zoomed ? "Fit the whole map in the panel" : "Show at full size and pan"}
               className="stencil cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber"
@@ -131,16 +160,94 @@ export function ObjectiveMap({ map }: { map: GameMap }) {
         )}
       >
         {svg ? (
-          <div
-            className={cx("relative", zoomed ? "w-[200%] max-w-none" : "w-full")}
-            // The SVG is fetched from assets.tarkov.dev, parsed with DOMParser and stripped
-            // to the layers being shown, so what lands here is markup we built rather than
-            // markup we were handed.
-            ref={(node) => {
-              if (!node) return;
-              node.replaceChildren(svg);
-            }}
-          />
+          <div className={cx("relative", zoomed ? "w-[200%] max-w-none" : "w-full")}>
+            <div
+              // This markup is still someone else's SVG, not something sanitised: `prepare`
+              // only drops inactive floor groups, so a `<script>` in the source would run
+              // when `replaceChildren` mounts it. Trust rests entirely on `svgPath` being a
+              // fixed, pinned assets.tarkov.dev URL rather than on anything done to the markup.
+              ref={(node) => {
+                if (!node) return;
+                node.replaceChildren(svg);
+              }}
+            />
+
+            {/*
+              A sibling of the SVG holder, not a child of it: that node's `replaceChildren`
+              re-fires on every render (the ref callback is a fresh closure each time), which
+              would silently wipe any JSX mounted inside it. Sharing this wrapper rather than
+              the scroll container above keeps pins aligned with the picture in both zoom
+              states — the scroll container's own box stays the panel's visible size when
+              zoomed, while this wrapper grows to the picture's full doubled width.
+            */}
+            <div className="pointer-events-none absolute inset-0">
+              {showPins
+                ? pins.map((pin) => {
+                    const { u, v } = project(calibration, pin.position);
+                    if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                    return (
+                      <button
+                        key={pin.key}
+                        type="button"
+                        onClick={() =>
+                          document
+                            .getElementById(`task-${pin.taskId}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                        }
+                        title={`${pin.taskName} — ${pin.description}`}
+                        style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                        className={cx(
+                          "pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border transition-transform hover:scale-150",
+                          pin.kind === "zone"
+                            ? "size-[10px] border-amber bg-amber/60"
+                            : "size-[7px] border-bone-dim bg-bone-dim/40",
+                        )}
+                      />
+                    );
+                  })
+                : null}
+
+              {/*
+                The trail. Faint dots for where you have been, the last one drawn as an arrow
+                because it is the only one whose facing you still care about.
+              */}
+              {trail.map((shot, index) => {
+                const { u, v } = project(calibration, shot);
+                if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                const latest = index === trail.length - 1;
+                if (!latest) {
+                  return (
+                    <span
+                      key={shot.name}
+                      style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                      className="absolute size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-rust/50"
+                    />
+                  );
+                }
+                // tarkov.dev adds the map's own rotation to the marker, and a further half
+                // turn on the quarter-turn maps. Ported rather than derived; confirm it
+                // against a screenshot whose facing you know.
+                const extra =
+                  calibration.coordinateRotation === 90 || calibration.coordinateRotation === 270
+                    ? calibration.coordinateRotation + 180
+                    : calibration.coordinateRotation;
+                return (
+                  <span
+                    key={shot.name}
+                    style={{
+                      left: `${u * 100}%`,
+                      top: `${v * 100}%`,
+                      rotate: shot.yaw === null ? undefined : `${shot.yaw + extra}deg`,
+                    }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 text-[16px] leading-none text-rust"
+                    aria-label="You are here"
+                  >
+                    {shot.yaw === null ? "●" : "▲"}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
         ) : (
           <p className="data flex min-h-[220px] items-center justify-center text-[11px] text-muted">
             loading
