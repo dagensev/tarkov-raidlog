@@ -1,10 +1,16 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
+
 import { ConnectLogs } from '@/components/connect-logs';
 import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { isFileSystemAccessSupported } from '@/lib/logs/fs-access-source';
 import { useAppStore } from '@/lib/store/app-store';
 import { useGameMode, useSelectedWipe, useTarkovData } from '@/lib/store/hooks';
 import { GAME_MODES } from '@/lib/tarkovdev/endpoints';
+
+/** Capability never changes within a page load, so there is nothing to subscribe to. */
+const subscribeNever = () => () => {};
 
 function fmt(ms: number): string {
     return new Date(ms).toLocaleDateString(undefined, {
@@ -110,6 +116,27 @@ function ScreenshotPanel() {
     const error = useAppStore((s) => s.screenshotError);
     const connect = useAppStore((s) => s.connectScreenshots);
     const reconnect = useAppStore((s) => s.reconnectScreenshots);
+
+    // A browser capability is external state, not React state. The server snapshot claims
+    // support so the prerendered HTML does not flash "unsupported" at a browser that has it;
+    // the client snapshot corrects it on hydration.
+    const supported = useSyncExternalStore(subscribeNever, isFileSystemAccessSupported, () => true);
+
+    if (!supported) {
+        return (
+            <Panel className='rise' style={{ animationDelay: '90ms' }}>
+                <PanelHeader title='Screenshot link' meta='unavailable' />
+                <div className='space-y-3 px-4 py-4'>
+                    <p className='text-[13px] leading-relaxed text-bone-dim'>
+                        The game writes where you were standing into the name of every screenshot it saves, which is how Raidlog would put you on the map.
+                        Reading a folder live needs the File System Access API, which exists in <span className='text-bone'>Chrome</span> and{' '}
+                        <span className='text-bone'>Edge</span> but not in Firefox or Safari.
+                    </p>
+                    <p className='text-[13px] leading-relaxed text-muted'>Everything else still works — only your position on the map is unavailable.</p>
+                </div>
+            </Panel>
+        );
+    }
 
     return (
         <Panel className='rise' style={{ animationDelay: '90ms' }}>
