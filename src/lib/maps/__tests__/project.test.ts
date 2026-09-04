@@ -61,6 +61,17 @@ describe("floorFor", () => {
   it("returns null for a map with no floors", () => {
     expect(floorFor(MAP_CALIBRATION.woods, 50)).toBeNull();
   });
+
+  it("resolves y on a shared boundary to the upper floor, because bands are half-open at the top", () => {
+    // Bands exclude their top value, so a position exactly on a boundary lands on the floor
+    // you are standing on rather than the one above your head. This guards against swapping
+    // the `<` and `<=` operators in the height check.
+    const streets = MAP_CALIBRATION["streets-of-tarkov"];
+    expect(floorFor(streets, 10)?.svgLayer).toBe("Second_Floor");
+    expect(floorFor(streets, 15)?.svgLayer).toBe("Third_Floor");
+    expect(floorFor(streets, 20)?.svgLayer).toBe("Fourth_Floor");
+    expect(floorFor(streets, -6)).toBeNull();
+  });
 });
 
 describe("calibrationFor", () => {
