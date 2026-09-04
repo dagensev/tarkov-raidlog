@@ -135,8 +135,8 @@ export default function RaidPage() {
                 {map.description ? <p className='border-t border-line px-4 py-3 text-[12px] leading-relaxed text-muted'>{map.description}</p> : null}
             </Panel>
 
-            {/* Keyed on the map so the load state starts fresh when you switch. */}
-            <ObjectiveMap key={map.id} map={map} />
+            {/* Keyed on the map so the load state starts fresh when you switch. These are sibling panels and must have distinct keys. */}
+            <ObjectiveMap key={`objective-${map.id}`} map={map} />
             <Map3d key={map.id} map={map} />
 
             {keys.length > 0 ? (
