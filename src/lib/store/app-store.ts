@@ -25,6 +25,9 @@ import {
   gameModeFromSessionMode,
   type GameMode,
 } from "@/lib/tarkovdev/endpoints";
+import type { TaskFilter } from "@/lib/tasks/filters";
+import type { MapFilter } from "@/lib/tasks/map-filter";
+import type { SortMode } from "@/lib/tasks/sort";
 import * as db from "./db";
 import { DEFAULT_SETTINGS, isStale, type Settings } from "./db";
 
@@ -44,6 +47,14 @@ export interface RaidState {
   /** Whether the last raid event says we are in a raid. */
   active: boolean;
   at: number;
+}
+
+/** How the task list is currently narrowed and ordered. */
+export interface TaskView {
+  filter: TaskFilter;
+  query: string;
+  kappaOnly: boolean;
+  sort: SortMode;
 }
 
 interface AppState {
@@ -67,12 +78,32 @@ interface AppState {
 
   raid: RaidState;
 
+  /**
+   * The map the task lists are filtered to, shared by the Tasks and Squad tabs.
+   *
+   * Deliberately here and not in `settings`: a filter is a browsing choice, not a setting,
+   * and it should not still be narrowing your list after a reload a week later. Living in
+   * the store is enough to survive tab switches, which are client-side navigations.
+   */
+  mapFilter: MapFilter;
+
+  /**
+   * The rest of the tasks tab's controls, here for the same reason — the page unmounts on
+   * every tab switch, and coming back to a list you had narrowed, un-narrowed, is a bug.
+   *
+   * Separate from `mapFilter` because only the map is shared with the squad tab. These are
+   * the tasks tab's own view of its list and nothing else reads them.
+   */
+  taskView: TaskView;
+
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
   setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
+  setMapFilter: (filter: MapFilter) => void;
+  setTaskView: (patch: Partial<TaskView>) => void;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
 }
@@ -168,6 +199,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionMode: null,
 
   raid: { active: false, at: 0 },
+  mapFilter: null,
+  taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
 
   async hydrate() {
     const [settings, manualTasks, events, bundle, itemIndex] = await Promise.all([
@@ -264,6 +297,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     else manualTasks[taskId] = status;
     set({ manualTasks });
     await db.set("manualTasks", manualTasks);
+  },
+
+  setMapFilter(mapFilter) {
+    set({ mapFilter });
+  },
+
+  setTaskView(patch) {
+    set({ taskView: { ...get().taskView, ...patch } });
   },
 
   async updateSettings(patch) {
