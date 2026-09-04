@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ScreenshotPosition } from "@/lib/logs/screenshots";
 import { calibrationFor, type MapFloor } from "@/lib/maps/calibration";
 import type { ObjectivePin } from "@/lib/maps/pins";
-import { project } from "@/lib/maps/project";
+import { floorFor, project } from "@/lib/maps/project";
 import type { GameMap } from "@/lib/tarkovdev/types";
 import { Panel, cx } from "./ui";
 
@@ -61,10 +61,29 @@ export function ObjectiveMap({
   const calibration = calibrationFor(map);
   const [text, setText] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  const [floor, setFloor] = useState<MapFloor | null>(null);
+  // What the user last clicked, and which shot was newest when they clicked it — not the
+  // floor itself. That lets the floor be derived below instead of pushed into state from an
+  // effect (the earlier plan tasked out exactly that pattern for `react-hooks/set-state-in-
+  // effect`), and it gives a manual click a well-defined lifetime: it sticks while you look
+  // around, and your next screenshot resumes following automatically.
+  const [manualFloor, setManualFloor] = useState<{
+    floor: MapFloor | null;
+    againstShot: string | null;
+  }>({ floor: null, againstShot: null });
   const [zoomed, setZoomed] = useState(false);
 
-  // No reset of text/failed/floor here: the caller keys this component on the map id (see
+  const newestShot = trail.length > 0 ? trail[trail.length - 1] : null;
+  // Ground_Level, standing on the 3rd floor, is still Ground_Level until you say otherwise:
+  // follow the newest screenshot's height band, unless the last click was made against that
+  // very shot, in which case honour it instead.
+  const floor =
+    manualFloor.againstShot === (newestShot?.name ?? null)
+      ? manualFloor.floor
+      : calibration && newestShot
+        ? floorFor(calibration, newestShot.y)
+        : null;
+
+  // No reset of text/failed/manualFloor here: the caller keys this component on the map id (see
   // raid/page.tsx), so a map change remounts rather than re-running this effect, and the
   // useState defaults above already are the reset values. Resetting here too would just be
   // a synchronous setState in an effect body, which the lint rule (rightly) flags.
@@ -99,7 +118,7 @@ export function ObjectiveMap({
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => setFloor(null)}
+                  onClick={() => setManualFloor({ floor: null, againstShot: newestShot?.name ?? null })}
                   className={cx(
                     "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
                     floor === null
@@ -113,7 +132,9 @@ export function ObjectiveMap({
                   <button
                     key={option.svgLayer}
                     type="button"
-                    onClick={() => setFloor(option)}
+                    onClick={() =>
+                      setManualFloor({ floor: option, againstShot: newestShot?.name ?? null })
+                    }
                     className={cx(
                       "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
                       floor?.svgLayer === option.svgLayer
