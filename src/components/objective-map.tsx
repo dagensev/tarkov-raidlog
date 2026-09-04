@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ScreenshotPosition } from "@/lib/logs/screenshots";
 import { calibrationFor, type MapFloor } from "@/lib/maps/calibration";
@@ -104,6 +104,16 @@ export function ObjectiveMap({
     return prepare(text, calibration.svgLayer, floor);
   }, [text, calibration, floor]);
 
+  const svgHolderRef = useRef<HTMLDivElement | null>(null);
+  // Keyed on `svg`, not run on every render: an unrelated re-render (the trail polling at
+  // 2 Hz, a pin toggle) must not re-detach and re-attach a several-thousand-node SVG. This
+  // only needs to run again when `prepare` hands back a genuinely different element — a
+  // fresh fetch or a floor switch.
+  useEffect(() => {
+    if (!svgHolderRef.current || !svg) return;
+    svgHolderRef.current.replaceChildren(svg);
+  }, [svg]);
+
   // Three maps publish raster tiles instead of an SVG. Say nothing rather than apologise,
   // the same way `Map3d` does for a map nobody has drawn.
   if (!calibration || failed) return null;
@@ -187,21 +197,62 @@ export function ObjectiveMap({
               // only drops inactive floor groups, so a `<script>` in the source would run
               // when `replaceChildren` mounts it. Trust rests entirely on `svgPath` being a
               // fixed, pinned assets.tarkov.dev URL rather than on anything done to the markup.
-              ref={(node) => {
-                if (!node) return;
-                node.replaceChildren(svg);
-              }}
+              ref={svgHolderRef}
             />
 
             {/*
-              A sibling of the SVG holder, not a child of it: that node's `replaceChildren`
-              re-fires on every render (the ref callback is a fresh closure each time), which
-              would silently wipe any JSX mounted inside it. Sharing this wrapper rather than
-              the scroll container above keeps pins aligned with the picture in both zoom
+              A sibling of the SVG holder, not a child of it: the effect above replaces that
+              node's children outright whenever `svg` changes (a fresh fetch, a floor switch),
+              which would silently wipe any JSX mounted inside it. Sharing this wrapper rather
+              than the scroll container above keeps pins aligned with the picture in both zoom
               states — the scroll container's own box stays the panel's visible size when
               zoomed, while this wrapper grows to the picture's full doubled width.
             */}
             <div className="pointer-events-none absolute inset-0">
+              {/*
+                Decoration only — the dot rendered below stays the clickable control for
+                every zone, polygon or not. `viewBox="0 0 100 100"` with
+                `preserveAspectRatio="none"` maps the same 0–1 `project()` fractions the
+                dots use, stretched independently on each axis exactly as their percentage
+                positioning already is.
+              */}
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 size-full"
+              >
+                {showPins
+                  ? pins.map((pin) => {
+                      if (pin.kind !== "zone" || !pin.outline || pin.outline.length < 3) return null;
+                      const points = pin.outline.map((point) => project(calibration, point));
+                      if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
+                      return (
+                        <polygon
+                          key={pin.key}
+                          points={points.map(({ u, v }) => `${u * 100},${v * 100}`).join(" ")}
+                          className="fill-amber/20 stroke-amber/70"
+                          strokeWidth="0.3"
+                        />
+                      );
+                    })
+                  : null}
+
+                {/* The trail, joined in order. Fewer than two points has nothing to join. */}
+                {trail.length >= 2 ? (
+                  <polyline
+                    points={trail
+                      .map((shot) => {
+                        const { u, v } = project(calibration, shot);
+                        return `${u * 100},${v * 100}`;
+                      })
+                      .join(" ")}
+                    fill="none"
+                    className="stroke-rust/50"
+                    strokeWidth="0.3"
+                  />
+                ) : null}
+              </svg>
+
               {showPins
                 ? pins.map((pin) => {
                     const { u, v } = project(calibration, pin.position);
@@ -286,7 +337,7 @@ export function ObjectiveMap({
         >
           the tarkov.dev map project
         </a>
-        .
+        . Your position appears once you take a screenshot in raid — this is not live tracking.
       </p>
     </Panel>
   );

@@ -403,18 +403,35 @@ async function loadItems(bundle: CoreBundle, set: SetState): Promise<void> {
 /**
  * Re-derive the trail from the screenshots folder.
  *
- * A listing, not a read: the position is in the file name, so this never opens a file and
- * costs the same whether the folder holds five screenshots or five thousand.
+ * A listing, not a read: the position is in the file name, so this never opens a file. That
+ * is the part worth keeping, not "cheap" — `list()` still walks every directory entry and
+ * `trailFrom` runs two regexes per name, so the cost scales with how many screenshots are
+ * in the folder.
  */
 async function readTrail(set: SetState, get: GetState): Promise<void> {
   if (!screenshots) return;
   try {
-    set({ trail: trailFrom(await screenshots.list(), get().raid.at) });
+    const trail = trailFrom(await screenshots.list(), get().raid.at);
+    // This runs on every 2 s poll. Setting a fresh array reference even when the folder
+    // has not changed would re-render the raid board — and the map SVG under it — at 2 Hz.
+    if (!sameTrail(get().trail, trail)) set({ trail });
   } catch (error) {
     // The folder was moved, or permission lapsed while the tab was open.
     screenshots = null;
     set({ screenshotStatus: "needs-permission", screenshotError: (error as Error).message });
   }
+}
+
+/**
+ * Whether two trails are the same, without a deep comparison.
+ *
+ * Names are the identity of a trail point, and the trail only ever grows within a raid, so
+ * the length plus the newest name is enough to tell "unchanged" from "one more shot landed".
+ */
+function sameTrail(a: readonly ScreenshotPosition[], b: readonly ScreenshotPosition[]): boolean {
+  if (a.length !== b.length) return false;
+  if (a.length === 0) return true;
+  return a[a.length - 1].name === b[b.length - 1].name;
 }
 
 async function startWatching(
