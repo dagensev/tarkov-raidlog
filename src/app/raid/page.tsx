@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 
 import { ItemIcon } from '@/components/item-icon';
 import { Map3d } from '@/components/map-3d';
+import { ObjectiveMap } from '@/components/objective-map';
 import { TaskRow, rowStatus } from '@/components/task-row';
 import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { useAppStore } from '@/lib/store/app-store';
@@ -135,6 +136,7 @@ export default function RaidPage() {
             </Panel>
 
             {/* Keyed on the map so the load state starts fresh when you switch. */}
+            <ObjectiveMap key={map.id} map={map} />
             <Map3d key={map.id} map={map} />
 
             {keys.length > 0 ? (
