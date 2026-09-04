@@ -44,10 +44,11 @@ export function objectivePins(
       // the same zone (e.g. 19 "Wrong_wheels" zones, one per position), so zone.id alone isn't
       // unique within an objective. Fold in the zone's index to keep keys distinct; zone.id
       // stays in the key too, for readability when debugging.
+      // Prefix with task.id because the same objective id can belong to several tasks.
       for (const [zoneIndex, zone] of objective.zones.entries()) {
         if (shownAs(zone.map) !== mapId) continue;
         pins.push({
-          key: `${objective.id}:zone:${zoneIndex}:${zone.id}`,
+          key: `${task.id}:${objective.id}:zone:${zoneIndex}:${zone.id}`,
           taskId: task.id,
           taskName: task.name,
           objectiveId: objective.id,
@@ -61,12 +62,13 @@ export function objectivePins(
       // A counter that runs across every possibleLocations entry, not one that resets per
       // entry: an objective can have several entries on the same map, and an index restarted
       // per entry would collide with itself.
+      // Prefix with task.id because the same objective id can belong to several tasks.
       let locationIndex = 0;
       for (const entry of objective.possibleLocations) {
         if (shownAs(entry.map) !== mapId) continue;
         for (const position of entry.positions) {
           pins.push({
-            key: `${objective.id}:loc:${entry.map}:${locationIndex}`,
+            key: `${task.id}:${objective.id}:loc:${entry.map}:${locationIndex}`,
             taskId: task.id,
             taskName: task.name,
             objectiveId: objective.id,

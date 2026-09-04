@@ -149,4 +149,22 @@ describe("objectivePins", () => {
     const keys = pins.map((pin) => pin.key);
     expect(new Set(keys).size).toBe(4);
   });
+
+  it("produces distinct keys when the same objective appears in multiple tasks", () => {
+    // Real data: objective 6391d9ba4b15ca31f76bc325 is shared by tasks make-amends, make-amends-2,
+    // and make-amends-3. A player holding two of these tasks gets pins with identical objective.id
+    // and zones/locations; keys must be scoped to the task to stay unique.
+    const sharedObjective = objective("o-shared", "Collect items", [
+      zone("customs", 1),
+      zone("customs", 2),
+    ]);
+    const tasks = [
+      task("task-a", "Make Amends", [sharedObjective]),
+      task("task-b", "Make Amends 2", [sharedObjective]),
+    ];
+    const pins = objectivePins(tasks, "customs", new Map());
+    expect(pins).toHaveLength(4);
+    const keys = pins.map((pin) => pin.key);
+    expect(new Set(keys).size).toBe(4);
+  });
 });
