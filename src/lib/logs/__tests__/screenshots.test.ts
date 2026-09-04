@@ -47,6 +47,14 @@ describe("parseScreenshotName", () => {
     expect(parseScreenshotName("2026-09-03[18-15]_bad, data, here (0).png")).toBeNull();
   });
 
+  it("accepts a double-digit screenshot index", () => {
+    const shot = parseScreenshotName(
+      "2026-09-03[18-15]_356.64, 2.58, -24.30_0.00000, 0.79692, 0.00000, 0.60408_16.86 (10).png",
+    );
+    expect(shot).not.toBeNull();
+    expect(shot!.x).toBeCloseTo(356.64, 2);
+  });
+
   it("rejects a non-png", () => {
     expect(
       parseScreenshotName(

@@ -16,7 +16,7 @@
  */
 
 /** Splits the name into its date, time and payload. Non-global: reused every poll. */
-const NAME_RE = /^(\d{4})-(\d{2})-(\d{2})\[(\d{2})-(\d{2})\]_?(.+) \(\d\)\.png$/;
+const NAME_RE = /^(\d{4})-(\d{2})-(\d{2})\[(\d{2})-(\d{2})\]_?(.+) \(\d+\)\.png$/;
 
 /**
  * Position and quaternion inside the payload.
@@ -26,7 +26,7 @@ const NAME_RE = /^(\d{4})-(\d{2})-(\d{2})\[(\d{2})-(\d{2})\]_?(.+) \(\d\)\.png$/
  * and `1.00000` forms the game also emits.
  */
 const POSITION_RE =
-  /^(-?\d+\.\d{2}), (-?\d+\.\d{2}), (-?\d+\.\d{2})_?(-?[\d.]\.\d{1,5}), (-?[\d.]\.\d{1,5}), (-?[\d.]\.\d{1,5}), (-?[\d.]\.\d{1,5})/;
+  /^(-?\d+\.\d{2}), (-?\d+\.\d{2}), (-?\d+\.\d{2})_?(-?\d\.\d{1,5}), (-?\d\.\d{1,5}), (-?\d\.\d{1,5}), (-?\d\.\d{1,5})/;
 
 /**
  * A screenshot's file name can trail the raid's start by up to 59 seconds, because the
