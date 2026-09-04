@@ -19,6 +19,7 @@
 - **Every regex must be non-global.** The codebase reuses regexes across calls and a `/g` flag would carry `lastIndex` between them. See the note atop `src/lib/logs/patterns.ts`.
 - **Comments explain why, not what.** Match the density and voice of `src/lib/tarkovdev/maps.ts` and `src/components/map-3d.tsx`.
 - Run `npm run typecheck` and `npm run lint` before every commit.
+- **Run `npx vitest run`, never `npm test`.** `npm test` also runs the Workers pool suite, which is flaky on this machine — `worker/__tests__/squad-room.test.ts` failed 0, 1 and 2 tests across three consecutive runs while passing 17/17 in isolation. Nothing in this plan touches `worker/`, so a failure there is not yours. The `src` suite is stable at 169/169.
 
 ## File Structure
 
@@ -850,7 +851,7 @@ In `src/lib/tarkovdev/client.ts`, in the objectives mapping (around line 307), a
 - [ ] **Step 6: Run the full test suite**
 
 ```bash
-npm test
+npx vitest run
 ```
 
 Expected: PASS. Existing `denormalize` tests must still pass — this only adds fields.
@@ -1510,7 +1511,7 @@ Mount it in `SettingsPage` immediately after `<LogPanel />`:
 - [ ] **Step 7: Run the full suite**
 
 ```bash
-npm test && npm run typecheck && npm run lint
+npx vitest run && npm run typecheck && npm run lint
 ```
 
 Expected: PASS throughout.
@@ -2020,7 +2021,7 @@ Expected: PASS, 10 tests — one per map with an SVG.
 - [ ] **Step 4: Run everything and commit**
 
 ```bash
-npm test && npm run typecheck && npm run lint && git add src/lib/maps/__tests__/live-svg.test.ts && git commit -m "Fail loudly if tarkov.dev redraws a map"
+npx vitest run && npm run typecheck && npm run lint && git add src/lib/maps/__tests__/live-svg.test.ts && git commit -m "Fail loudly if tarkov.dev redraws a map"
 ```
 
 ---
