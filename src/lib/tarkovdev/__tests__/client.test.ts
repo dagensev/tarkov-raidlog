@@ -229,6 +229,41 @@ describe("denormalize", () => {
       description: "An industrial area.",
     });
   });
+
+  it("carries objective zones and possible locations through", () => {
+    const raw = bundle();
+    raw.tasks.t1.objectives[0].zones = [
+      {
+        id: "z1",
+        map: "map1",
+        position: { x: 1, y: 2, z: 3 },
+        outline: [
+          { x: 0, y: 2, z: 0 },
+          { x: 2, y: 2, z: 0 },
+        ],
+        top: 5,
+        bottom: 1,
+      },
+    ];
+    raw.tasks.t1.objectives[0].possibleLocations = [
+      { map: "map1", positions: [{ x: 9, y: 8, z: 7 }] },
+    ];
+
+    const objective = denormalize(raw).tasks.find((t) => t.id === "t1")!.objectives[0];
+    expect(objective.zones).toHaveLength(1);
+    expect(objective.zones[0].position).toEqual({ x: 1, y: 2, z: 3 });
+    expect(objective.zones[0].outline).toHaveLength(2);
+    expect(objective.zones[0].top).toBe(5);
+    expect(objective.possibleLocations[0].positions[0]).toEqual({ x: 9, y: 8, z: 7 });
+  });
+
+  it("gives an objective with no geometry empty arrays, not undefined", () => {
+    // The fixture's objective has neither, which is the common case: 873 of 1398 real
+    // objectives have nowhere to point.
+    const objective = denormalize(bundle()).tasks.find((t) => t.id === "t1")!.objectives[0];
+    expect(objective.zones).toEqual([]);
+    expect(objective.possibleLocations).toEqual([]);
+  });
 });
 
 describe("referencedItemIds", () => {

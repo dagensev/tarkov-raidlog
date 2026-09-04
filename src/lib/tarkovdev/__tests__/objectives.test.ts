@@ -15,6 +15,8 @@ const objective = (partial: Partial<TaskObjective>): TaskObjective => ({
   optional: false,
   maps: [],
   __typename: "shoot",
+  zones: [],
+  possibleLocations: [],
   ...partial,
 });
 
