@@ -7,8 +7,38 @@ describe("project", () => {
   it("places a real Customs screenshot where it was taken", () => {
     // From the 2026-09-03 screenshot: 0.1 m from a published player spawn.
     const point = project(MAP_CALIBRATION.customs, { x: 356.64, z: -24.3 });
-    expect(point.u).toBeCloseTo(0.319, 2);
-    expect(point.v).toBeCloseTo(0.48, 2);
+    expect(point.u).toBeCloseTo(0.319, 3);
+    expect(point.v).toBeCloseTo(0.5197, 3);
+  });
+
+  /**
+   * The top edge of a drawing is the map's *largest* rotated z.
+   *
+   * Reversing this mirrors every pin vertically, and almost nothing catches it: the aspect
+   * ratio is unchanged, every point stays inside the bounds, and pins keep sitting on their
+   * own outlines because both move together. It first shipped inverted and was only noticed
+   * because a marker looked slightly wrong — slightly, because that screenshot happened to
+   * be near the centre line, where a mirror is nearly a no-op.
+   *
+   * Checked against named landmarks tarkov.dev publishes for each map rather than against
+   * our own arithmetic, so this fails if the orientation flips back.
+   */
+  it("counts v down from the largest rotated z, matching tarkov.dev's own placement", () => {
+    // Customs, rotation 180: rotated z is -z, so the *smallest* raw z is the top edge.
+    const customs = MAP_CALIBRATION.customs;
+    const north = project(customs, { x: 0, z: -300 });
+    const south = project(customs, { x: 0, z: 230 });
+    expect(north.v).toBeLessThan(south.v);
+
+    // tarkov.dev's label positions, with the fractions their Leaflet CRS produces.
+    const landmarks: ReadonlyArray<[string, { x: number; z: number }, number]> = [
+      ["Dorms", { x: 200, z: 150 }, 0.8401],
+      ["Big Red", { x: -215, z: -119 }, 0.3456],
+      ["New Gas", { x: 404, z: 31 }, 0.6213],
+    ];
+    for (const [name, position, expected] of landmarks) {
+      expect(project(customs, position).v, name).toBeCloseTo(expected, 3);
+    }
   });
 
   it("puts the bounds corners at the corners", () => {

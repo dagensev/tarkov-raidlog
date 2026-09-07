@@ -43,11 +43,17 @@ export function project(
   const [px, pz] = rotate(point.x, point.z, rotation);
 
   const minX = Math.min(ax, bx);
-  const minZ = Math.min(az, bz);
+  const maxZ = Math.max(az, bz);
 
   return {
     u: (px - minX) / Math.abs(bx - ax),
-    v: (pz - minZ) / Math.abs(bz - az),
+    // Counted down from the *largest* rotated z, not up from the smallest. tarkov.dev's
+    // CRS negates the vertical scale (`transform[2] * -1`) and Leaflet anchors an overlay
+    // to its north-west corner, so the top edge of every drawing is the maximum z. Getting
+    // this backwards mirrors the whole map vertically, which is close to invisible near
+    // the centre line — the screenshot this was first checked against sat at v=0.48 when
+    // it should have been 0.52 — and is a third of the map out at the edges.
+    v: (maxZ - pz) / Math.abs(bz - az),
   };
 }
 
