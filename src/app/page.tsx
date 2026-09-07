@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { ConnectLogs } from "@/components/connect-logs";
 import { TaskRow, rowStatus } from "@/components/task-row";
 import { EmptyNote, Panel, PanelHeader, cx } from "@/components/ui";
+import { useAppStore } from "@/lib/store/app-store";
 import {
   useAvailability,
   useMapsWithTasks,
@@ -13,24 +14,10 @@ import {
 } from "@/lib/store/hooks";
 import { useInSquad, useSquadHoldingCounts } from "@/lib/store/squad-hooks";
 import { taskIsOnMap } from "@/lib/tarkovdev/maps";
+import { FILTERS, type TaskFilter } from "@/lib/tasks/filters";
+import { mapFilterFrom, resolveMapFilter } from "@/lib/tasks/map-filter";
 import { mapOptions } from "@/lib/tasks/map-options";
 import { SORT_MODES, sharedWithSquad, sortTasks, type SortMode } from "@/lib/tasks/sort";
-
-/**
- * Filters are log-derived only.
- *
- * There was a "Ready" filter built on computed availability. It was dropped because it
- * could not be trusted: trader loyalty is not in the logs, 176 tasks carry event flags we
- * do not evaluate, and 13 unlock on a timer we ignore. Showing a confident "ready" that is
- * sometimes wrong is worse than not showing one.
- */
-type Filter = "started" | "finished" | "all";
-
-const FILTERS: Array<{ id: Filter; label: string; title: string }> = [
-  { id: "started", label: "In progress", title: "Accepted and not yet handed in" },
-  { id: "finished", label: "Done", title: "Completed this wipe" },
-  { id: "all", label: "All", title: "Every task in the game" },
-];
 
 export default function TasksPage() {
   const tasks = useTasks();
@@ -40,13 +27,20 @@ export default function TasksPage() {
   const squadHolders = useSquadHoldingCounts();
   const inSquad = useInSquad();
 
-  const [filter, setFilter] = useState<Filter>("started");
-  const [query, setQuery] = useState("");
-  const [mapId, setMapId] = useState<string>("");
-  const [kappaOnly, setKappaOnly] = useState(false);
-  const [sort, setSort] = useState<SortMode>("progress");
+  // Every control on this page lives in the store rather than in component state: the tab
+  // links are routes, so the page unmounts whenever you look at a raid or your squad, and
+  // a filter you set thirty seconds ago should still be set when you come back.
+  const { filter, query, kappaOnly, sort } = useAppStore((s) => s.taskView);
+  const setView = useAppStore((s) => s.setTaskView);
 
-  const counts = useMemo<Record<Filter, number>>(() => {
+  // The map is the one control the squad tab shares, so it is kept apart from the rest.
+  // Nothing picked means every map here; the squad tab reads the same absence as "follow
+  // the detected map".
+  const mapFilter = useAppStore((s) => s.mapFilter);
+  const setMapFilter = useAppStore((s) => s.setMapFilter);
+  const mapId = resolveMapFilter(mapFilter);
+
+  const counts = useMemo<Record<TaskFilter, number>>(() => {
     let started = 0;
     let finished = 0;
     for (const task of tasks) {
@@ -148,7 +142,7 @@ export default function TasksPage() {
               key={option.id}
               type="button"
               title={option.title}
-              onClick={() => setFilter(option.id)}
+              onClick={() => setView({ filter: option.id })}
               className={cx(
                 "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
                 filter === option.id
@@ -164,13 +158,13 @@ export default function TasksPage() {
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setView({ query: e.target.value })}
               placeholder="Search tasks or traders"
               className="data w-52 border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone placeholder:text-muted focus:border-amber-dim focus:outline-none"
             />
             <select
               value={activeMapId}
-              onChange={(e) => setMapId(e.target.value)}
+              onChange={(e) => setMapFilter(mapFilterFrom(e.target.value))}
               title="Only maps with something to show under the current filters"
               className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
             >
@@ -183,7 +177,7 @@ export default function TasksPage() {
             </select>
             <select
               value={activeSort}
-              onChange={(e) => setSort(e.target.value as SortMode)}
+              onChange={(e) => setView({ sort: e.target.value as SortMode })}
               aria-label="Sort order"
               title={sortModes.find((mode) => mode.id === activeSort)?.title}
               className="data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none"
@@ -198,7 +192,7 @@ export default function TasksPage() {
             </select>
             <button
               type="button"
-              onClick={() => setKappaOnly((v) => !v)}
+              onClick={() => setView({ kappaOnly: !kappaOnly })}
               title="Only tasks required for Kappa"
               className={cx(
                 "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",

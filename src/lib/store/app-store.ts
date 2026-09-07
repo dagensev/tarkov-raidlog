@@ -10,6 +10,12 @@ import {
   requestPermission,
 } from "@/lib/logs/fs-access-source";
 import type { TaskStatus } from "@/lib/logs/progress";
+import { type ScreenshotPosition, trailFrom } from "@/lib/logs/screenshots";
+import {
+  FileSystemAccessScreenshotSource,
+  pickScreenshotDirectory,
+  type ScreenshotSource,
+} from "@/lib/logs/screenshot-source";
 import { LogWatcher, type ScanProgress } from "@/lib/logs/watcher";
 import { analyzeWipes, type WipeAnalysis } from "@/lib/logs/wipe";
 import {
@@ -25,6 +31,9 @@ import {
   gameModeFromSessionMode,
   type GameMode,
 } from "@/lib/tarkovdev/endpoints";
+import type { TaskFilter } from "@/lib/tasks/filters";
+import type { MapFilter } from "@/lib/tasks/map-filter";
+import type { SortMode } from "@/lib/tasks/sort";
 import * as db from "./db";
 import { DEFAULT_SETTINGS, isStale, type Settings } from "./db";
 
@@ -46,10 +55,23 @@ export interface RaidState {
   at: number;
 }
 
+/** How the task list is currently narrowed and ordered. */
+export interface TaskView {
+  filter: TaskFilter;
+  query: string;
+  kappaOnly: boolean;
+  sort: SortMode;
+}
+
 interface AppState {
   logStatus: LogStatus;
   logError: string | null;
   scanProgress: ScanProgress | null;
+
+  screenshotStatus: LogStatus;
+  screenshotError: string | null;
+  /** This raid's screenshots, oldest first. Derived each poll, never accumulated. */
+  trail: ScreenshotPosition[];
 
   events: LogEvent[];
   wipes: WipeAnalysis | null;
@@ -67,12 +89,34 @@ interface AppState {
 
   raid: RaidState;
 
+  /**
+   * The map the task lists are filtered to, shared by the Tasks and Squad tabs.
+   *
+   * Deliberately here and not in `settings`: a filter is a browsing choice, not a setting,
+   * and it should not still be narrowing your list after a reload a week later. Living in
+   * the store is enough to survive tab switches, which are client-side navigations.
+   */
+  mapFilter: MapFilter;
+
+  /**
+   * The rest of the tasks tab's controls, here for the same reason — the page unmounts on
+   * every tab switch, and coming back to a list you had narrowed, un-narrowed, is a bug.
+   *
+   * Separate from `mapFilter` because only the map is shared with the squad tab. These are
+   * the tasks tab's own view of its list and nothing else reads them.
+   */
+  taskView: TaskView;
+
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
+  connectScreenshots: () => Promise<void>;
+  reconnectScreenshots: () => Promise<void>;
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
   setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
+  setMapFilter: (filter: MapFilter) => void;
+  setTaskView: (patch: Partial<TaskView>) => void;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
 }
@@ -83,6 +127,11 @@ interface AppState {
  */
 let watcher: LogWatcher | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Kept out of reactive state for the same reason the watcher is: this is a handle, not
+ * something the UI renders, and putting it in the store would re-render on every poll.
+ */
+let screenshots: ScreenshotSource | null = null;
 /** Detaches the "tab became visible" catch-up read. Set while watching. */
 let stopVisibilityCatchUp: (() => void) | null = null;
 /** True while a read is in flight, so two triggers cannot read the same bytes twice. */
@@ -168,6 +217,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionMode: null,
 
   raid: { active: false, at: 0 },
+  screenshotStatus: "idle",
+  screenshotError: null,
+  trail: [],
+  mapFilter: null,
+  taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
 
   async hydrate() {
     const [settings, manualTasks, events, bundle, itemIndex] = await Promise.all([
@@ -200,6 +254,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    const shots = await db.get("screenshotDirectory");
+    if (shots) {
+      const permission = await checkPermission(shots);
+      if (permission === "granted") {
+        screenshots = new FileSystemAccessScreenshotSource(shots);
+        set({ screenshotStatus: "watching" });
+      } else {
+        set({ screenshotStatus: "needs-permission" });
+      }
+    }
+
     void get().refreshData();
   },
 
@@ -226,6 +291,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     await startWatching(handle, set, get);
+  },
+
+  async connectScreenshots() {
+    try {
+      const handle = await pickScreenshotDirectory();
+      await db.set("screenshotDirectory", handle);
+      screenshots = new FileSystemAccessScreenshotSource(handle);
+      set({ screenshotStatus: "watching", screenshotError: null });
+      await readTrail(set, get);
+    } catch (error) {
+      if ((error as DOMException)?.name === "AbortError") return;
+      set({ screenshotStatus: "error", screenshotError: (error as Error).message });
+    }
+  },
+
+  async reconnectScreenshots() {
+    const handle = await db.get("screenshotDirectory");
+    if (!handle) return get().connectScreenshots();
+    const permission = await requestPermission(handle);
+    if (permission !== "granted") {
+      set({ screenshotStatus: "needs-permission" });
+      return;
+    }
+    screenshots = new FileSystemAccessScreenshotSource(handle);
+    set({ screenshotStatus: "watching", screenshotError: null });
+    await readTrail(set, get);
   },
 
   async rescan() {
@@ -266,6 +357,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.set("manualTasks", manualTasks);
   },
 
+  setMapFilter(mapFilter) {
+    set({ mapFilter });
+  },
+
+  setTaskView(patch) {
+    set({ taskView: { ...get().taskView, ...patch } });
+  },
+
   async updateSettings(patch) {
     const settings = { ...get().settings, ...patch };
     set({ settings });
@@ -299,6 +398,40 @@ async function loadItems(bundle: CoreBundle, set: SetState): Promise<void> {
   } catch {
     // Keys fall back to showing an id; not worth surfacing as a failure.
   }
+}
+
+/**
+ * Re-derive the trail from the screenshots folder.
+ *
+ * A listing, not a read: the position is in the file name, so this never opens a file. That
+ * is the part worth keeping, not "cheap" — `list()` still walks every directory entry and
+ * `trailFrom` runs two regexes per name, so the cost scales with how many screenshots are
+ * in the folder.
+ */
+async function readTrail(set: SetState, get: GetState): Promise<void> {
+  if (!screenshots) return;
+  try {
+    const trail = trailFrom(await screenshots.list(), get().raid.at);
+    // This runs on every 2 s poll. Setting a fresh array reference even when the folder
+    // has not changed would re-render the raid board — and the map SVG under it — at 2 Hz.
+    if (!sameTrail(get().trail, trail)) set({ trail });
+  } catch (error) {
+    // The folder was moved, or permission lapsed while the tab was open.
+    screenshots = null;
+    set({ screenshotStatus: "needs-permission", screenshotError: (error as Error).message });
+  }
+}
+
+/**
+ * Whether two trails are the same, without a deep comparison.
+ *
+ * Names are the identity of a trail point, and the trail only ever grows within a raid, so
+ * the length plus the newest name is enough to tell "unchanged" from "one more shot landed".
+ */
+function sameTrail(a: readonly ScreenshotPosition[], b: readonly ScreenshotPosition[]): boolean {
+  if (a.length !== b.length) return false;
+  if (a.length === 0) return true;
+  return a[a.length - 1].name === b[b.length - 1].name;
 }
 
 async function startWatching(
@@ -341,14 +474,18 @@ async function startWatching(
     polling = true;
     try {
       const fresh = await watcher.poll();
-      if (fresh.length === 0) return;
-      const events = [...get().events, ...fresh];
-      set({
-        events,
-        raid: raidFrom(fresh, get().raid),
-        sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
-      });
-      await db.set("events", events);
+      if (fresh.length > 0) {
+        const events = [...get().events, ...fresh];
+        set({
+          events,
+          raid: raidFrom(fresh, get().raid),
+          sessionMode: sessionModeFrom(fresh) ?? get().sessionMode,
+        });
+        await db.set("events", events);
+      }
+      // After the raid state is up to date, so a raid that just started empties the trail
+      // in the same tick rather than showing the previous raid's dots for one poll.
+      if (get().raid.active) await readTrail(set, get);
     } catch (error) {
       // A revoked permission or a folder that vanished mid-session.
       set({ logStatus: "needs-permission", logError: (error as Error).message });

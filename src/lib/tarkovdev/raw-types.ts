@@ -29,6 +29,30 @@ export interface RawTraderRequirement {
   value: number;
 }
 
+/** A point in the game world. */
+export interface GamePosition {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * A volume an objective happens in — a stash spot, an area to visit.
+ *
+ * `outline` is the footprint as a polygon, which is what makes "plant it in this area"
+ * drawable as an area rather than a dot.
+ */
+export interface RawObjectiveZone {
+  id: string;
+  /** Map id. */
+  map: string;
+  position: GamePosition;
+  size?: GamePosition;
+  outline?: GamePosition[];
+  top?: number;
+  bottom?: number;
+}
+
 export interface RawObjective {
   id: string;
   /** Translation key; in practice equal to the objective id. */
@@ -46,6 +70,7 @@ export interface RawObjective {
   /** Item ids, grouped: each inner array is an alternative set. */
   requiredKeys?: string[][];
   possibleLocations?: Array<{ map: string; positions: Array<{ x: number; y: number; z: number }> }>;
+  zones?: RawObjectiveZone[];
   targetNames?: string[];
   exitStatus?: string[];
   playerLevel?: number;

@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { TaskRow } from '@/components/task-row';
 import { Button, EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { useAppStore } from '@/lib/store/app-store';
 import { useAvailability, useCurrentMap, useMaps, useMapsWithTasks, useTaskStates, useTasks } from '@/lib/store/hooks';
 import { useSquadStore } from '@/lib/store/squad-store';
 import { taskIsOnMap } from '@/lib/tarkovdev/maps';
+import { mapFilterFrom, resolveMapFilter } from '@/lib/tasks/map-filter';
 import { mapOptions } from '@/lib/tasks/map-options';
 
 function StatusLamp() {
@@ -151,9 +153,11 @@ function SharedTasks() {
     const availability = useAvailability();
     const maps = useMapsWithTasks();
     const currentMap = useCurrentMap();
-    // Null means "follow the detected map"; picking anything, including Any map, sticks.
-    const [chosenMapId, setChosenMapId] = useState<string | null>(null);
-    const mapId = chosenMapId ?? currentMap?.id ?? '';
+    // Shared with the tasks tab. Nothing picked still means "follow the detected map" here;
+    // picking anything, including Any map, sticks — and travels with you to the other tab.
+    const mapFilter = useAppStore((s) => s.mapFilter);
+    const setMapFilter = useAppStore((s) => s.setMapFilter);
+    const mapId = resolveMapFilter(mapFilter, currentMap?.id);
 
     /** Everything the squad is doubled up on, before the dropdown narrows it to one map. */
     const sharedAnywhere = useMemo(() => {
@@ -196,7 +200,7 @@ function SharedTasks() {
                 action={
                     <select
                         value={mapId}
-                        onChange={(e) => setChosenMapId(e.target.value)}
+                        onChange={(e) => setMapFilter(mapFilterFrom(e.target.value))}
                         className='data border border-line-bright bg-ground-2 px-2 py-1 text-[11px] text-bone focus:border-amber-dim focus:outline-none'
                     >
                         <option value=''>Any map ({sharedAnywhere.length})</option>

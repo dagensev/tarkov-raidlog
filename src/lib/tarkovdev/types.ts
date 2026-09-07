@@ -32,6 +32,29 @@ export interface TraderRequirement {
   value: number;
 }
 
+/** A point in the game world. */
+export interface GamePosition {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** A volume an objective happens in. `map` is a map id. */
+export interface ObjectiveZone {
+  id: string;
+  map: string;
+  position: GamePosition;
+  outline: GamePosition[] | null;
+  top: number | null;
+  bottom: number | null;
+}
+
+/** Candidate spots for one quest item. `map` is a map id. */
+export interface ObjectiveLocations {
+  map: string;
+  positions: GamePosition[];
+}
+
 export interface TaskObjective {
   id: string;
   description: string;
@@ -52,6 +75,10 @@ export interface TaskObjective {
   playerLevel?: number | null;
   level?: number | null;
   trader?: NamedRef | null;
+  /** Where this objective happens. Empty for the 873 objectives with nowhere to point. */
+  zones: ObjectiveZone[];
+  /** Where a quest item may be found. Empty unless this is a `findQuestItem`. */
+  possibleLocations: ObjectiveLocations[];
 }
 
 /** Keys a task needs, grouped by the map they are used on. */

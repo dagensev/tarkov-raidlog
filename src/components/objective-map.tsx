@@ -1,0 +1,344 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { ScreenshotPosition } from "@/lib/logs/screenshots";
+import { calibrationFor, type MapFloor } from "@/lib/maps/calibration";
+import type { ObjectivePin } from "@/lib/maps/pins";
+import { floorFor, project } from "@/lib/maps/project";
+import type { GameMap } from "@/lib/tarkovdev/types";
+import { Panel, cx } from "./ui";
+
+/**
+ * The map you are dropping into, with your objectives on it.
+ *
+ * The SVG is fetched as text and inlined rather than dropped into an `<img>`, because every
+ * floor is a sibling `<g>` in one file and they are all opaque — the only thing marking a
+ * non-ground floor is `class="shadow"`, which is a drop-shadow and nothing more. An `<img>`
+ * therefore draws every storey of Streets stacked on top of each other. Inlining lets the
+ * inactive ones be hidden, and is what makes a floor switcher possible at all.
+ *
+ * These are small: 193 KB for Customs against 0.5-11.5 MB for the 3D renders, which is why
+ * this panel loads on open rather than waiting to be asked like `Map3d` does.
+ */
+
+/** Strip the layers we are not showing, and return the SVG element to mount. */
+function prepare(text: string, baseLayer: string, activeFloor: MapFloor | null): SVGSVGElement | null {
+  const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
+  const svg = parsed.querySelector("svg");
+  if (!svg || parsed.querySelector("parsererror")) return null;
+
+  const shown = new Set([baseLayer, activeFloor?.svgLayer].filter(Boolean) as string[]);
+
+  // Only top-level groups are floors. Descending further would hit the groups that make up
+  // the drawing itself — buildings, roads, trees.
+  for (const group of Array.from(svg.children)) {
+    const id = group.getAttribute("id");
+    const isFloor = id !== null && /(_Level|_Floor|Basement)$/.test(id);
+    if (isFloor && !shown.has(id)) group.remove();
+  }
+
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.setAttribute("class", "block h-auto w-full");
+  return svg as SVGSVGElement;
+}
+
+export function ObjectiveMap({
+  map,
+  pins,
+  trail,
+  showPins,
+  onTogglePins,
+}: {
+  map: GameMap;
+  pins: readonly ObjectivePin[];
+  /** This raid's screenshots, oldest first. Empty on browsers with no File System Access. */
+  trail: readonly ScreenshotPosition[];
+  showPins: boolean;
+  onTogglePins: () => void;
+}) {
+  const calibration = calibrationFor(map);
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  // What the user last clicked, and which shot was newest when they clicked it — not the
+  // floor itself. That lets the floor be derived below instead of pushed into state from an
+  // effect (the earlier plan tasked out exactly that pattern for `react-hooks/set-state-in-
+  // effect`), and it gives a manual click a well-defined lifetime: it sticks while you look
+  // around, and your next screenshot resumes following automatically.
+  const [manualFloor, setManualFloor] = useState<{
+    floor: MapFloor | null;
+    againstShot: string | null;
+  }>({ floor: null, againstShot: null });
+  const [zoomed, setZoomed] = useState(false);
+
+  const newestShot = trail.length > 0 ? trail[trail.length - 1] : null;
+  // Ground_Level, standing on the 3rd floor, is still Ground_Level until you say otherwise:
+  // follow the newest screenshot's height band, unless the last click was made against that
+  // very shot, in which case honour it instead.
+  const floor =
+    manualFloor.againstShot === (newestShot?.name ?? null)
+      ? manualFloor.floor
+      : calibration && newestShot
+        ? floorFor(calibration, newestShot.y)
+        : null;
+
+  // No reset of text/failed/manualFloor here: the caller keys this component on the map id (see
+  // raid/page.tsx), so a map change remounts rather than re-running this effect, and the
+  // useState defaults above already are the reset values. Resetting here too would just be
+  // a synchronous setState in an effect body, which the lint rule (rightly) flags.
+  useEffect(() => {
+    if (!calibration) return;
+    const aborter = new AbortController();
+    fetch(calibration.svgPath, { signal: aborter.signal })
+      .then((response) => (response.ok ? response.text() : Promise.reject(new Error("no map"))))
+      .then(setText)
+      .catch(() => {
+        if (!aborter.signal.aborted) setFailed(true);
+      });
+    return () => aborter.abort();
+  }, [calibration]);
+
+  const svg = useMemo(() => {
+    if (!text || !calibration) return null;
+    return prepare(text, calibration.svgLayer, floor);
+  }, [text, calibration, floor]);
+
+  const svgHolderRef = useRef<HTMLDivElement | null>(null);
+  // Keyed on `svg`, not run on every render: an unrelated re-render (the trail polling at
+  // 2 Hz, a pin toggle) must not re-detach and re-attach a several-thousand-node SVG. This
+  // only needs to run again when `prepare` hands back a genuinely different element — a
+  // fresh fetch or a floor switch.
+  useEffect(() => {
+    if (!svgHolderRef.current || !svg) return;
+    svgHolderRef.current.replaceChildren(svg);
+  }, [svg]);
+
+  // Three maps publish raster tiles instead of an SVG. Say nothing rather than apologise,
+  // the same way `Map3d` does for a map nobody has drawn.
+  if (!calibration || failed) return null;
+
+  return (
+    <Panel className="rise">
+      <header className="border-b border-line">
+        <div className="flex items-baseline justify-between gap-4 px-4 pt-3 pb-2">
+          <h2 className="stencil text-[11px] text-amber">Map</h2>
+          <div className="flex items-center gap-3">
+            {calibration.floors.length > 0 ? (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setManualFloor({ floor: null, againstShot: newestShot?.name ?? null })}
+                  className={cx(
+                    "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
+                    floor === null
+                      ? "border-amber text-amber"
+                      : "border-line-bright text-muted hover:border-amber hover:text-amber",
+                  )}
+                >
+                  Ground
+                </button>
+                {calibration.floors.map((option) => (
+                  <button
+                    key={option.svgLayer}
+                    type="button"
+                    onClick={() =>
+                      setManualFloor({ floor: option, againstShot: newestShot?.name ?? null })
+                    }
+                    className={cx(
+                      "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
+                      floor?.svgLayer === option.svgLayer
+                        ? "border-amber text-amber"
+                        : "border-line-bright text-muted hover:border-amber hover:text-amber",
+                    )}
+                  >
+                    {option.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={onTogglePins}
+              title={showPins ? "Hide objective pins" : "Show objective pins"}
+              className={cx(
+                "stencil cursor-pointer border px-2 py-1 text-[10px] transition-colors",
+                showPins
+                  ? "border-amber text-amber"
+                  : "border-line-bright text-muted hover:border-amber hover:text-amber",
+              )}
+            >
+              {pins.length} pins
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoomed((v) => !v)}
+              title={zoomed ? "Fit the whole map in the panel" : "Show at full size and pan"}
+              className="stencil cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber"
+            >
+              {zoomed ? "Fit" : "Zoom"}
+            </button>
+          </div>
+        </div>
+        <div className="ticks h-[3px] opacity-40" />
+      </header>
+
+      <div
+        className={cx(
+          "relative bg-ground-2",
+          zoomed ? "max-h-[70vh] overflow-auto" : "overflow-hidden",
+          !svg && "min-h-[220px]",
+        )}
+      >
+        {svg ? (
+          <div className={cx("relative", zoomed ? "w-[200%] max-w-none" : "w-full")}>
+            <div
+              // This markup is still someone else's SVG, not something sanitised: `prepare`
+              // only drops inactive floor groups, so a `<script>` in the source would run
+              // when `replaceChildren` mounts it. Trust rests entirely on `svgPath` being a
+              // fixed, pinned assets.tarkov.dev URL rather than on anything done to the markup.
+              ref={svgHolderRef}
+            />
+
+            {/*
+              A sibling of the SVG holder, not a child of it: the effect above replaces that
+              node's children outright whenever `svg` changes (a fresh fetch, a floor switch),
+              which would silently wipe any JSX mounted inside it. Sharing this wrapper rather
+              than the scroll container above keeps pins aligned with the picture in both zoom
+              states — the scroll container's own box stays the panel's visible size when
+              zoomed, while this wrapper grows to the picture's full doubled width.
+            */}
+            <div className="pointer-events-none absolute inset-0">
+              {/*
+                Decoration only — the dot rendered below stays the clickable control for
+                every zone, polygon or not. `viewBox="0 0 100 100"` with
+                `preserveAspectRatio="none"` maps the same 0–1 `project()` fractions the
+                dots use, stretched independently on each axis exactly as their percentage
+                positioning already is.
+              */}
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 size-full"
+              >
+                {showPins
+                  ? pins.map((pin) => {
+                      if (pin.kind !== "zone" || !pin.outline || pin.outline.length < 3) return null;
+                      const points = pin.outline.map((point) => project(calibration, point));
+                      if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
+                      return (
+                        <polygon
+                          key={pin.key}
+                          points={points.map(({ u, v }) => `${u * 100},${v * 100}`).join(" ")}
+                          className="fill-amber/20 stroke-amber/70"
+                          strokeWidth="0.3"
+                        />
+                      );
+                    })
+                  : null}
+
+                {/* The trail, joined in order. Fewer than two points has nothing to join. */}
+                {trail.length >= 2 ? (
+                  <polyline
+                    points={trail
+                      .map((shot) => {
+                        const { u, v } = project(calibration, shot);
+                        return `${u * 100},${v * 100}`;
+                      })
+                      .join(" ")}
+                    fill="none"
+                    className="stroke-rust/50"
+                    strokeWidth="0.3"
+                  />
+                ) : null}
+              </svg>
+
+              {showPins
+                ? pins.map((pin) => {
+                    const { u, v } = project(calibration, pin.position);
+                    if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                    return (
+                      <button
+                        key={pin.key}
+                        type="button"
+                        onClick={() =>
+                          document
+                            .getElementById(`task-${pin.taskId}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                        }
+                        title={`${pin.taskName} — ${pin.description}`}
+                        style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                        className={cx(
+                          "pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border transition-transform hover:scale-150",
+                          pin.kind === "zone"
+                            ? "size-[10px] border-amber bg-amber/60"
+                            : "size-[7px] border-bone-dim bg-bone-dim/40",
+                        )}
+                      />
+                    );
+                  })
+                : null}
+
+              {/*
+                The trail. Faint dots for where you have been, the last one drawn as an arrow
+                because it is the only one whose facing you still care about.
+              */}
+              {trail.map((shot, index) => {
+                const { u, v } = project(calibration, shot);
+                if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                const latest = index === trail.length - 1;
+                if (!latest) {
+                  return (
+                    <span
+                      key={shot.name}
+                      style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                      className="absolute size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-rust/50"
+                    />
+                  );
+                }
+                // tarkov.dev adds the map's own rotation to the marker, and a further half
+                // turn on the quarter-turn maps. Ported rather than derived; confirm it
+                // against a screenshot whose facing you know.
+                const extra =
+                  calibration.coordinateRotation === 90 || calibration.coordinateRotation === 270
+                    ? calibration.coordinateRotation + 180
+                    : calibration.coordinateRotation;
+                return (
+                  <span
+                    key={shot.name}
+                    style={{
+                      left: `${u * 100}%`,
+                      top: `${v * 100}%`,
+                      rotate: shot.yaw === null ? undefined : `${shot.yaw + extra}deg`,
+                    }}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 text-[16px] leading-none text-rust"
+                    aria-label="You are here"
+                  >
+                    {shot.yaw === null ? "●" : "▲"}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="data flex min-h-[220px] items-center justify-center text-[11px] text-muted">
+            loading
+          </p>
+        )}
+      </div>
+
+      <p className="data border-t border-line px-4 py-2 text-[10px] text-muted">
+        Drawn by{" "}
+        <a
+          href="https://github.com/the-hideout/tarkov-dev-svg-maps/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-bone-dim underline decoration-line-bright underline-offset-2 hover:text-amber"
+        >
+          the tarkov.dev map project
+        </a>
+        . Your position appears once you take a screenshot in raid — this is not live tracking.
+      </p>
+    </Panel>
+  );
+}

@@ -174,6 +174,8 @@ describe("mapsWithTasks", () => {
             optional: false,
             maps: objectiveMapIds.map((m) => ({ id: m, name: m })),
             __typename: "visit",
+            zones: [],
+            possibleLocations: [],
           },
         ]
       : [],
@@ -244,6 +246,8 @@ describe("taskIsOnMap", () => {
           optional: false,
           maps: [{ id: "m3", name: "Shoreline" }],
           __typename: "visit",
+          zones: [],
+          possibleLocations: [],
         },
       ],
     } as Task;

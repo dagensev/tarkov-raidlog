@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { LogEvent } from "@/lib/logs/events";
+import { trailFrom } from "@/lib/logs/screenshots";
+import { MemoryScreenshotSource } from "@/lib/logs/screenshot-source";
 import { RAID_ACTIVE_WINDOW_MS, isRaidActive, type RaidState } from "../app-store";
 
 /**
@@ -82,5 +84,72 @@ describe("raid state ordering", () => {
       event("game-started", Date.UTC(2026, 8, 2, 18, 54, 13)),
     ];
     expect(__testRaidFrom(events, { active: false, at: 0 }).active).toBe(false);
+  });
+});
+
+describe("screenshot trail", () => {
+  const raidAt = new Date(2026, 8, 3, 18, 10).getTime();
+  const shot = (hour: number, minute: number, x: number) =>
+    `2026-09-03[${String(hour).padStart(2, "0")}-${String(minute).padStart(2, "0")}]_` +
+    `${x.toFixed(2)}, 2.58, -24.30_0.00000, 0.79692, 0.00000, 0.60408_16.86 (0).png`;
+
+  it("derives this raid's trail from a directory listing", async () => {
+    const source = new MemoryScreenshotSource([shot(17, 0, 1), shot(18, 20, 2)]);
+    const trail = trailFrom(await source.list(), raidAt);
+    expect(trail.map((s) => s.x)).toEqual([2]);
+  });
+
+  it("grows as screenshots are taken, without accumulating state", async () => {
+    const source = new MemoryScreenshotSource([shot(18, 20, 1)]);
+    expect(trailFrom(await source.list(), raidAt)).toHaveLength(1);
+    source.add(shot(18, 25, 2));
+    expect(trailFrom(await source.list(), raidAt)).toHaveLength(2);
+  });
+
+  it("empties when a later raid starts, with no explicit reset", async () => {
+    const source = new MemoryScreenshotSource([shot(18, 20, 1)]);
+    const laterRaid = new Date(2026, 8, 3, 19, 0).getTime();
+    expect(trailFrom(await source.list(), laterRaid)).toEqual([]);
+  });
+
+  it("re-derives the same trail from an unchanged listing instead of appending to it", async () => {
+    // trail is "derived each poll, never accumulated" (see AppState.trail) — calling this
+    // twice on the same listing must come back the same size, not grow.
+    const source = new MemoryScreenshotSource([shot(18, 20, 1), shot(18, 25, 2)]);
+    const names = await source.list();
+    expect(trailFrom(names, raidAt)).toHaveLength(2);
+    expect(trailFrom(names, raidAt)).toHaveLength(2);
+  });
+});
+
+describe("poll ordering: raid state before trail", () => {
+  // Regression guard for the fix in 973227b: pollOnce must fold fresh events into the raid
+  // state (raidFrom) *before* re-deriving the trail (trailFrom) from it. Get that backwards
+  // and a raid that just started keeps showing the previous raid's screenshots for one poll.
+  const shot = (hour: number, minute: number, x: number) =>
+    `2026-09-03[${String(hour).padStart(2, "0")}-${String(minute).padStart(2, "0")}]_` +
+    `${x.toFixed(2)}, 2.58, -24.30_0.00000, 0.79692, 0.00000, 0.60408_16.86 (0).png`;
+
+  it("empties the trail the instant a new raid starts, but not if filtered against the stale raid", async () => {
+    const { __testRaidFrom } = await import("../app-store");
+
+    const previousRaid: RaidState = { active: true, at: new Date(2026, 8, 3, 17, 0).getTime() };
+    // The one fresh event this poll saw: game-started for a brand-new raid.
+    const freshEvents = [event("game-started", new Date(2026, 8, 3, 18, 10, 13).getTime())];
+    // Taken during the previous raid, long before the new one started.
+    const names = [shot(17, 30, 1)];
+
+    const raid = __testRaidFrom(freshEvents, previousRaid);
+
+    // Correct order: raidFrom runs first, so trailFrom filters against the NEW raid.at and
+    // the old screenshot is gone in the same tick the new raid begins.
+    expect(trailFrom(names, raid.at)).toEqual([]);
+
+    // What the bug looked like: filtering against the OLD raid's timestamp (i.e. reading the
+    // trail before folding in fresh events) keeps last raid's screenshot on the map for one
+    // extra poll. This assertion is here so reordering pollOnce's two lines fails a test
+    // instead of only showing up as a bug report — do not delete it as "redundant" with the
+    // line above; the two together are the point.
+    expect(trailFrom(names, previousRaid.at)).not.toEqual([]);
   });
 });

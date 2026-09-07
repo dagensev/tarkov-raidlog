@@ -119,11 +119,14 @@ export function TaskRow({
   state,
   availability,
   mapId,
+  id,
 }: {
   task: Task;
   state?: TaskState;
   availability?: TaskAvailability;
   mapId?: string;
+  /** Anchor, so a pin on the map can scroll to this row. */
+  id?: string;
 }) {
   const [confirming, setConfirming] = useState(false);
   const setManualTask = useAppStore((s) => s.setManualTask);
@@ -138,7 +141,7 @@ export function TaskRow({
     : task.objectives;
 
   return (
-    <li className="group relative flex gap-3 border-b border-line/70 transition-colors hover:bg-panel-2/60">
+    <li id={id} className="group relative flex gap-3 border-b border-line/70 transition-colors hover:bg-panel-2/60">
       <span className={cx("w-[3px] shrink-0", style.rail)} aria-hidden />
 
       <div className="min-w-0 flex-1 py-2.5 pr-3">

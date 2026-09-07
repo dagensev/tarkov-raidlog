@@ -4,11 +4,13 @@ import { useMemo } from 'react';
 
 import { ItemIcon } from '@/components/item-icon';
 import { Map3d } from '@/components/map-3d';
+import { ObjectiveMap } from '@/components/objective-map';
 import { TaskRow, rowStatus } from '@/components/task-row';
 import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { objectivePins } from '@/lib/maps/pins';
 import { useAppStore } from '@/lib/store/app-store';
-import { useAvailability, useCurrentMap, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
-import { tarkovDevMapUrl, taskIsOnMap } from '@/lib/tarkovdev/maps';
+import { useAvailability, useCurrentMap, useMaps, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
+import { foldedMapIds, tarkovDevMapUrl, taskIsOnMap } from '@/lib/tarkovdev/maps';
 
 /**
  * The raid board.
@@ -84,6 +86,17 @@ export default function RaidPage() {
         return [...collected.entries()].sort((a, b) => b[1].tasks.length - a[1].tasks.length);
     }, [holding, map]);
 
+    const maps = useMaps();
+    const trail = useAppStore((s) => s.trail);
+    const showPins = useAppStore((s) => s.settings.showObjectivePins);
+    const update = useAppStore((s) => s.updateSettings);
+
+    /** Pins for the tasks you are holding here. Folding is what keeps Night Factory on Factory. */
+    const pins = useMemo(() => {
+        if (!map) return [];
+        return objectivePins(holding, map.id, foldedMapIds(maps));
+    }, [holding, map, maps]);
+
     if (!map) {
         return (
             <Panel>
@@ -134,7 +147,15 @@ export default function RaidPage() {
                 {map.description ? <p className='border-t border-line px-4 py-3 text-[12px] leading-relaxed text-muted'>{map.description}</p> : null}
             </Panel>
 
-            {/* Keyed on the map so the load state starts fresh when you switch. */}
+            {/* Keyed on the map so the load state starts fresh when you switch. These are sibling panels and must have distinct keys. */}
+            <ObjectiveMap
+                key={`objective-${map.id}`}
+                map={map}
+                pins={pins}
+                trail={trail}
+                showPins={showPins}
+                onTogglePins={() => void update({ showObjectivePins: !showPins })}
+            />
             <Map3d key={map.id} map={map} />
 
             {keys.length > 0 ? (
@@ -170,7 +191,14 @@ export default function RaidPage() {
                 ) : (
                     <ul>
                         {holding.map((task) => (
-                            <TaskRow key={task.id} task={task} state={states.get(task.id)} availability={availability.get(task.id)} mapId={map.id} />
+                            <TaskRow
+                                key={task.id}
+                                task={task}
+                                state={states.get(task.id)}
+                                availability={availability.get(task.id)}
+                                mapId={map.id}
+                                id={`task-${task.id}`}
+                            />
                         ))}
                     </ul>
                 )}

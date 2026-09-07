@@ -32,6 +32,8 @@ export interface Settings {
   gameMode: GameMode | null;
   /** Poll interval while the game is running, in ms. */
   pollIntervalMs: number;
+  /** Whether objective pins are drawn on the raid map. */
+  showObjectivePins: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -40,10 +42,13 @@ export const DEFAULT_SETTINGS: Settings = {
   mapOverride: null,
   gameMode: null,
   pollIntervalMs: 2000,
+  showObjectivePins: true,
 };
 
 interface StoredValues {
   logDirectory: FileSystemDirectoryHandle;
+  /** The game's `Screenshots` folder. A different root from the logs, so it is picked apart. */
+  screenshotDirectory: FileSystemDirectoryHandle;
   events: LogEvent[];
   settings: Settings;
   manualTasks: Record<string, TaskStatus>;

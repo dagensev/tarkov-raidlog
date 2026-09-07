@@ -324,6 +324,21 @@ export function denormalize(bundle: CoreBundle, items?: ItemIndex): TarkovData {
       level: objective.level ?? null,
       trader: traderRef(objective.trader),
       shotType: null,
+      // Already cached: `loadCoreBundle` keeps `RawTask` whole, so these arrived with the
+      // bundle and were being dropped here rather than never fetched. Normalised to arrays
+      // so every consumer can iterate without a null check.
+      zones: (objective.zones ?? []).map((zone) => ({
+        id: zone.id,
+        map: zone.map,
+        position: zone.position,
+        outline: zone.outline ?? null,
+        top: zone.top ?? null,
+        bottom: zone.bottom ?? null,
+      })),
+      possibleLocations: (objective.possibleLocations ?? []).map((entry) => ({
+        map: entry.map,
+        positions: entry.positions ?? [],
+      })),
     })),
     neededKeys: (raw.neededKeys ?? []).map((group) => ({
       map: mapRef(group.map),
