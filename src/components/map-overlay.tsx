@@ -261,7 +261,7 @@ export function MapOverlay({
             />
 
             {/*
-              A sibling of the SVG holder, not a child of it: the effect above replaces that
+              A sibling of the SVG holder, not a child of it: the ref callback above replaces that
               node's children outright whenever `prepared` changes, which would silently wipe
               any JSX mounted inside it. Sharing this wrapper is also what keeps every marker
               aligned with the picture through the transform above, for free.
