@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ScreenshotPosition } from "@/lib/logs/screenshots";
 import type { MapCalibration, MapFloor } from "@/lib/maps/calibration";
@@ -28,7 +28,16 @@ interface Prepared {
   aspect: number;
 }
 
-/** Strip the layers we are not showing, and return the SVG element to mount. */
+/**
+ * Strip the layers we are not showing, and return the SVG element to mount.
+ *
+ * The drawing is fetched as text and inlined rather than dropped into an `<img>` because
+ * every floor in one of these files is a sibling `<g>`, all equally opaque — the only thing
+ * that marks a non-ground floor is a `class="shadow"` drop-shadow, nothing more. An `<img>`
+ * would render every storey of Streets stacked on top of one another; inlining is what makes
+ * a floor switcher possible at all, since it lets this loop remove the groups we are not
+ * showing.
+ */
 function prepare(
   text: string,
   baseLayer: string,
@@ -97,16 +106,29 @@ export function MapOverlay({
   const areaRef = useRef<HTMLDivElement | null>(null);
   const [area, setArea] = useState<Size>({ width: 0, height: 0 });
 
-  // Measured rather than assumed: the open area is the viewport minus this overlay's own
-  // header and footer, and it changes when the window does.
-  useEffect(() => {
-    const node = areaRef.current;
+  // Measured when the node attaches rather than waiting for the observer's first
+  // callback, because that callback is not guaranteed to arrive. Reopening the map mounts
+  // an element that already has its final size, so there is no size *change* to report:
+  // a fresh ResizeObserver on that element recorded nothing in 300 ms, and the overlay
+  // sat on "loading" for ever.
+  //
+  // A ref callback rather than an effect on both counts: it runs when the node actually
+  // attaches, and setting state here is not the synchronous setState in an effect body
+  // that `react-hooks/set-state-in-effect` forbids.
+  const attachArea = useCallback((node: HTMLDivElement | null) => {
+    areaRef.current = node;
     if (!node) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setArea({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
+    const measure = () => {
+      const { width, height } = node.getBoundingClientRect();
+      setArea({ width, height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(node);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      areaRef.current = null;
+    };
   }, []);
 
   const box = useMemo(
@@ -116,15 +138,22 @@ export function MapOverlay({
 
   const view = FITTED;
 
-  const svgHolderRef = useRef<HTMLDivElement | null>(null);
-  // Keyed on `prepared`, not run on every render: an unrelated re-render (the trail polling
-  // at 2 Hz, a pin toggle, a pan) must not re-detach and re-attach a several-thousand-node
-  // SVG. This only needs to run again when `prepare` hands back a genuinely different
-  // element — a fresh fetch or a floor switch.
-  useEffect(() => {
-    if (!svgHolderRef.current || !prepared) return;
-    svgHolderRef.current.replaceChildren(prepared.svg);
-  }, [prepared]);
+  // A ref callback keyed on `prepared`, not an effect: the holder only enters the tree
+  // once the area has been measured, which is a render *after* `prepared` arrives, so an
+  // effect keyed on `prepared` alone fires against a null ref and never runs again — the
+  // map came up blank on first open until a floor switch happened to produce a new
+  // `prepared` at a moment when the holder existed.
+  //
+  // Keying the callback on `prepared` keeps the property the effect was reaching for: an
+  // unrelated re-render (the trail polling at 2 Hz, a pin toggle) leaves the callback's
+  // identity alone, so a several-thousand-node SVG is not re-detached and re-attached.
+  // It re-runs only for a genuinely different element — a fresh fetch or a floor switch.
+  const mountSvg = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node && prepared) node.replaceChildren(prepared.svg);
+    },
+    [prepared],
+  );
 
   // The page behind must not scroll under a layer that covers it.
   useEffect(() => {
@@ -211,7 +240,7 @@ export function MapOverlay({
       </header>
 
       <div
-        ref={areaRef}
+        ref={attachArea}
         className="relative flex flex-1 touch-none items-center justify-center overflow-hidden bg-ground-2 select-none"
       >
         {prepared && box.width > 0 ? (
@@ -228,7 +257,7 @@ export function MapOverlay({
               // only drops inactive floor groups, so a `<script>` in the source would run
               // when `replaceChildren` mounts it. Trust rests entirely on `svgPath` being a
               // fixed, pinned assets.tarkov.dev URL rather than on anything done to the markup.
-              ref={svgHolderRef}
+              ref={mountSvg}
               className="size-full"
             />
 
