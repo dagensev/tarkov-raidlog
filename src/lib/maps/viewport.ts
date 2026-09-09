@@ -94,3 +94,27 @@ export function zoomAt(
     within,
   );
 }
+
+/** Firefox's own value for `DOM_DELTA_LINE`: a "line" of wheel scroll is sixteen CSS pixels. */
+const PIXELS_PER_LINE = 16;
+
+/**
+ * `DOM_DELTA_PAGE` has no reported page height to convert with, so this stands in for one —
+ * chosen as a typical viewport height rather than the 1-3px it would be worth read as a raw
+ * pixel count, which used to make a page of scroll barely zoom at all.
+ */
+const PIXELS_PER_PAGE = 800;
+
+/**
+ * Convert a wheel event's delta into a zoom factor, in CSS pixels regardless of which of the
+ * three `deltaMode` values the browser reported: pixels (0), lines (1), or pages (2).
+ *
+ * Exponential so that zooming in and back out by the same scroll distance returns you to
+ * where you started: `wheelFactor(d, m) * wheelFactor(-d, m) === 1` exactly, because
+ * `exp(a) * exp(-a) = 1`.
+ */
+export function wheelFactor(deltaY: number, deltaMode: number): number {
+  const pixels =
+    deltaMode === 1 ? deltaY * PIXELS_PER_LINE : deltaMode === 2 ? deltaY * PIXELS_PER_PAGE : deltaY;
+  return Math.exp(-pixels * 0.0015);
+}

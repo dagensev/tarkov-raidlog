@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { FITTED, MAX_SCALE, clampView, fitBox, zoomAt, type Point, type View } from "../viewport";
+import {
+  FITTED,
+  MAX_SCALE,
+  clampView,
+  fitBox,
+  wheelFactor,
+  zoomAt,
+  type Point,
+  type View,
+} from "../viewport";
 
 /** A 16:9 open area, in CSS pixels. */
 const WIDE = { width: 1600, height: 900 };
@@ -124,5 +133,39 @@ describe("zoomAt", () => {
     expect(view.scale).toBe(1);
     expect(view.x).toBeCloseTo(0, 10);
     expect(view.y).toBeCloseTo(0, 10);
+  });
+});
+
+describe("wheelFactor", () => {
+  it("zooms in on a negative delta", () => {
+    expect(wheelFactor(-100, 0)).toBeGreaterThan(1);
+  });
+
+  it("zooms out on a positive delta", () => {
+    expect(wheelFactor(100, 0)).toBeLessThan(1);
+  });
+
+  it("treats a line as sixteen pixels", () => {
+    expect(wheelFactor(3, 1)).toBeCloseTo(wheelFactor(48, 0), 12);
+  });
+
+  it("treats a page as materially more than the same number in pixels", () => {
+    // "materially larger": how far each factor sits from 1 (the no-op factor), not the
+    // factor itself — both are on the zoom-in side, so a raw comparison would not show it.
+    const page = Math.abs(wheelFactor(1, 2) - 1);
+    const pixel = Math.abs(wheelFactor(1, 0) - 1);
+    expect(page).toBeGreaterThan(pixel * 10);
+  });
+
+  it("composes a delta and its negation back to a factor of 1", () => {
+    const cases: Array<[number, number]> = [
+      [120, 0],
+      [-120, 0],
+      [3, 1],
+      [1, 2],
+    ];
+    for (const [delta, mode] of cases) {
+      expect(wheelFactor(delta, mode) * wheelFactor(-delta, mode)).toBeCloseTo(1, 10);
+    }
   });
 });

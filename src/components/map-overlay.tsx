@@ -10,6 +10,7 @@ import {
   FITTED,
   clampView,
   fitBox,
+  wheelFactor,
   zoomAt,
   type Point,
   type Size,
@@ -170,10 +171,7 @@ export function MapOverlay({
     if (!node) return;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      // Firefox reports whole lines rather than pixels. Exponential so that zooming in and
-      // back out by the same scroll distance returns you to where you started.
-      const distance = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-      const factor = Math.exp(-distance * 0.0015);
+      const factor = wheelFactor(event.deltaY, event.deltaMode);
       const at = pointerAt(event, node);
       setRaw((current) => zoomAt(clampView(current, box, area), factor, at, box, area));
     };
