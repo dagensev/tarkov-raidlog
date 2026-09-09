@@ -137,7 +137,12 @@ export function MapOverlay({
     if (!node) return;
     const measure = () => {
       const { width, height } = node.getBoundingClientRect();
-      setArea({ width, height });
+      // ResizeObserver.observe() always delivers one initial callback on top of the measure()
+      // call just below, so without this, every open measures the unchanged size twice and
+      // re-renders (and swaps both effects' listeners) for nothing.
+      setArea((current) =>
+        current.width === width && current.height === height ? current : { width, height },
+      );
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -278,7 +283,16 @@ export function MapOverlay({
 
   const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
+    // Captured here rather than read at cleanup time, because by then the overlay (and
+    // whatever it moved focus to) has already unmounted.
+    const trigger = document.activeElement;
     closeRef.current?.focus();
+    return () => {
+      // Guards against the element that opened the map having left the document while the
+      // overlay was up (the strip re-rendering, say) — focusing a detached node is a no-op
+      // at best and throws in some browsers.
+      if (trigger instanceof HTMLElement && document.contains(trigger)) trigger.focus();
+    };
   }, []);
 
   const chip =
@@ -291,7 +305,12 @@ export function MapOverlay({
       role="dialog"
       aria-modal="true"
       aria-label={`Map of ${map.name}`}
-      className="fixed inset-0 z-50 flex flex-col bg-ground"
+      // m-0 looks like a no-op, but it is not: this fixed element is rendered as a non-last
+      // child of the raid page's `space-y-4` list, which gives every non-last child a
+      // margin-bottom Tailwind adds via `:where()` — low enough specificity that this
+      // class's plain `.m-0` still beats it. Without it, `bottom: 0` resolves 16px short of
+      // the actual viewport bottom and the page behind shows through in a band there.
+      className="fixed inset-0 z-50 m-0 flex flex-col bg-ground"
     >
       <header className="shrink-0 border-b border-line bg-panel/70">
         <div className="flex flex-wrap items-center justify-between gap-4 px-4 pt-3 pb-2">
@@ -476,7 +495,12 @@ export function MapOverlay({
                       onClick={(event) => {
                         // Without this the stage's own click clears the selection again.
                         event.stopPropagation();
-                        if (dragged.current) return;
+                        // A keyboard activation (Enter/Space on a focused button) dispatches
+                        // a click with detail 0, unlike a real pointer click. Without this
+                        // check, panning with the mouse once leaves `dragged.current` true
+                        // forever after (it is only ever cleared by a pointerdown), and every
+                        // later keyboard activation of a pin would be swallowed.
+                        if (event.detail !== 0 && dragged.current) return;
                         setSelectedKey((current) => (current === pin.key ? null : pin.key));
                       }}
                       aria-label={`${pin.taskName} — ${pin.description}`}
@@ -548,7 +572,15 @@ export function MapOverlay({
         )}
 
         {shown ? (
-          <div className="absolute bottom-4 left-4 max-w-[min(360px,calc(100%-2rem))] border border-line-bright bg-panel/95 p-3">
+          <div
+            // The card is a child of the stage, which owns pan (pointerdown), clearing the
+            // selection (click) and zoom (doubleclick) — all things a user clicking inside
+            // the card is not asking for. Stop each here before it reaches the stage.
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="absolute bottom-4 left-4 max-w-[min(360px,calc(100%-2rem))] border border-line-bright bg-panel/95 p-3"
+          >
             <p className="stencil text-[11px] text-amber">{shown.taskName}</p>
             <p className="mt-1.5 text-[12px] leading-relaxed text-bone-dim">{shown.description}</p>
             {shown.key === selectedKey ? (

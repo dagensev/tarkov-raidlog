@@ -39,7 +39,7 @@ export interface View {
 export const MIN_SCALE = 1;
 export const MAX_SCALE = 8;
 
-export const FITTED: View = { scale: 1, x: 0, y: 0 };
+export const FITTED: View = { scale: MIN_SCALE, x: 0, y: 0 };
 
 /** The largest box of `aspect` that fits `within`. Zero for an area not yet measured. */
 export function fitBox(aspect: number, within: Size): Size {
