@@ -227,6 +227,18 @@ export function MapOverlay({
     };
   }, [box, area]);
 
+  // Two sources, one card. Hover wins while it lasts, so leaving a pin falls back to
+  // whatever you clicked, or to nothing. Keyed by `key` rather than holding the pin object,
+  // because `objectivePins` rebuilds the array in the parent and identity would not survive
+  // it — and because a pin that disappears (pins toggled off, a task completed) then takes
+  // its card with it for free.
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const visible = showPins ? pins : [];
+  const shownKey = hoveredKey ?? selectedKey;
+  const shown = visible.find((pin) => pin.key === shownKey) ?? null;
+
   // A ref callback keyed on `prepared`, not an effect: the holder only enters the tree
   // once the area has been measured, which is a render *after* `prepared` arrives, so an
   // effect keyed on `prepared` alone fires against a null ref and never runs again — the
@@ -348,6 +360,9 @@ export function MapOverlay({
           const at = pointerAt(event, event.currentTarget);
           setRaw((current) => zoomAt(clampView(current, box, area), 2, at, box, area));
         }}
+        onClick={() => {
+          if (!dragged.current) setSelectedKey(null);
+        }}
         className={cx(
           "relative flex flex-1 touch-none items-center justify-center overflow-hidden bg-ground-2 select-none",
           // No grab cursor at the fitted scale, because there is nothing to pan to.
@@ -391,21 +406,19 @@ export function MapOverlay({
                 preserveAspectRatio="none"
                 className="pointer-events-none absolute inset-0 size-full"
               >
-                {showPins
-                  ? pins.map((pin) => {
-                      if (pin.kind !== "zone" || !pin.outline || pin.outline.length < 3) return null;
-                      const points = pin.outline.map((point) => project(calibration, point));
-                      if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
-                      return (
-                        <polygon
-                          key={pin.key}
-                          points={points.map(({ u, v }) => `${u * 100},${v * 100}`).join(" ")}
-                          className="fill-amber/20 stroke-amber/70"
-                          strokeWidth="0.3"
-                        />
-                      );
-                    })
-                  : null}
+                {visible.map((pin) => {
+                  if (pin.kind !== "zone" || !pin.outline || pin.outline.length < 3) return null;
+                  const points = pin.outline.map((point) => project(calibration, point));
+                  if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
+                  return (
+                    <polygon
+                      key={pin.key}
+                      points={points.map(({ u, v }) => `${u * 100},${v * 100}`).join(" ")}
+                      className="fill-amber/20 stroke-amber/70"
+                      strokeWidth="0.3"
+                    />
+                  );
+                })}
 
                 {/* The trail, joined in order. Fewer than two points has nothing to join. */}
                 {trail.length >= 2 ? (
@@ -423,41 +436,58 @@ export function MapOverlay({
                 ) : null}
               </svg>
 
-              {showPins
-                ? pins.map((pin) => {
-                    const { u, v } = project(calibration, pin.position);
-                    if (u < 0 || u > 1 || v < 0 || v > 1) return null;
-                    // The counter-scale and the hover grow cannot live on the same element.
-                    // Both compile to the `scale` CSS property, so an inline `scale` here
-                    // would beat the button's `:hover` rule outright — a stylesheet rule
-                    // that is not `!important` never wins over an inline declaration — and
-                    // `hover:scale-150` would be dead at every zoom, fitted view included.
-                    // Worse, `transition-transform` is Tailwind's shorthand for
-                    // `transition-property: transform, translate, scale, rotate`, so with
-                    // both classes on one element the counter-scale itself would ease over
-                    // 150ms on every wheel event and never settle during a continuous zoom.
-                    // A wrapper carries the position and the counter-scale; the button
-                    // inside keeps its own size, transition and hover grow untouched.
-                    return (
-                      <div
-                        key={pin.key}
-                        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-                        style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
-                      >
-                        <button
-                          type="button"
-                          title={`${pin.taskName} — ${pin.description}`}
-                          className={cx(
-                            "pointer-events-auto block cursor-pointer rounded-full border transition-transform hover:scale-150",
-                            pin.kind === "zone"
-                              ? "size-[10px] border-amber bg-amber/60"
-                              : "size-[7px] border-bone-dim bg-bone-dim/40",
-                          )}
-                        />
-                      </div>
-                    );
-                  })
-                : null}
+              {visible.map((pin) => {
+                const { u, v } = project(calibration, pin.position);
+                if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                // The counter-scale and the hover grow cannot live on the same element.
+                // Both compile to the `scale` CSS property, so an inline `scale` here
+                // would beat the button's `:hover` rule outright — a stylesheet rule
+                // that is not `!important` never wins over an inline declaration — and
+                // `hover:scale-150` would be dead at every zoom, fitted view included.
+                // Worse, `transition-transform` is Tailwind's shorthand for
+                // `transition-property: transform, translate, scale, rotate`, so with
+                // both classes on one element the counter-scale itself would ease over
+                // 150ms on every wheel event and never settle during a continuous zoom.
+                // A wrapper carries the position and the counter-scale; the button
+                // inside keeps its own size, transition and hover grow untouched.
+                return (
+                  <div
+                    key={pin.key}
+                    className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
+                  >
+                    <button
+                      type="button"
+                      // Focus counts as hover: these are real buttons, so tabbing through
+                      // them is what makes the map reachable without a mouse at all.
+                      onFocus={() => setHoveredKey(pin.key)}
+                      onBlur={() => setHoveredKey((current) => (current === pin.key ? null : current))}
+                      onPointerEnter={() => {
+                        // Sweeping the map to pan would otherwise strobe the card through
+                        // every pin crossed.
+                        if (!drag.current) setHoveredKey(pin.key);
+                      }}
+                      onPointerLeave={() =>
+                        setHoveredKey((current) => (current === pin.key ? null : current))
+                      }
+                      onClick={(event) => {
+                        // Without this the stage's own click clears the selection again.
+                        event.stopPropagation();
+                        if (dragged.current) return;
+                        setSelectedKey((current) => (current === pin.key ? null : pin.key));
+                      }}
+                      aria-label={`${pin.taskName} — ${pin.description}`}
+                      className={cx(
+                        "pointer-events-auto block cursor-pointer rounded-full border transition-transform hover:scale-150",
+                        pin.kind === "zone"
+                          ? "size-[10px] border-amber bg-amber/60"
+                          : "size-[7px] border-bone-dim bg-bone-dim/40",
+                        pin.key === shownKey && "ring-2 ring-amber",
+                      )}
+                    />
+                  </div>
+                );
+              })}
 
               {/*
                 The trail. Faint dots for where you have been, the last one drawn as an arrow
@@ -513,6 +543,32 @@ export function MapOverlay({
             {text !== null && prepared === null ? "this map could not be read" : "loading"}
           </p>
         )}
+
+        {shown ? (
+          <div className="absolute bottom-4 left-4 max-w-[min(360px,calc(100%-2rem))] border border-line-bright bg-panel/95 p-3">
+            <p className="stencil text-[11px] text-amber">{shown.taskName}</p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-bone-dim">{shown.description}</p>
+            {hoveredKey === null ? (
+              // Only on a pin you clicked. A hover card vanishes the moment you move toward
+              // it, so offering a link on one would be offering something unreachable.
+              <button
+                type="button"
+                onClick={() => {
+                  const id = `task-${shown.taskId}`;
+                  onClose();
+                  // After the overlay unmounts, so the scroll lock is off and the row is
+                  // somewhere a smooth scroll can actually take you.
+                  requestAnimationFrame(() => {
+                    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  });
+                }}
+                className="stencil mt-2.5 cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber"
+              >
+                Go to task →
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <p className="data shrink-0 border-t border-line bg-panel/70 px-4 py-2 text-[10px] text-muted">
