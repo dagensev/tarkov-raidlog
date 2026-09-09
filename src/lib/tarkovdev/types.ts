@@ -79,6 +79,17 @@ export interface TaskObjective {
   zones: ObjectiveZone[];
   /** Where a quest item may be found. Empty unless this is a `findQuestItem`. */
   possibleLocations: ObjectiveLocations[];
+  /**
+   * Item ids that each satisfy this objective — alternatives, not a set to collect.
+   * One entry means "hand over exactly this"; the largest real one has 110, meaning
+   * "any medical item". How many there are is how much weight the requirement carries.
+   *
+   * Ids rather than refs, because the item index they would resolve against holds only
+   * the handful of key items tasks point at, and the sell check carries its own names.
+   */
+  items: string[];
+  /** `buildWeapon` only: mod ids the finished gun must carry. */
+  containsAll: string[];
 }
 
 /** Keys a task needs, grouped by the map they are used on. */
@@ -105,6 +116,8 @@ export interface Task {
   traderRequirements: TraderRequirement[];
   objectives: TaskObjective[];
   neededKeys: NeededKeys[];
+  /** Can be picked up again after being failed, so its items still matter. */
+  restartable?: boolean;
 }
 
 export interface GameMap {

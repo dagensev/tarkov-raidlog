@@ -65,6 +65,14 @@ export interface RawObjective {
   maps?: string[];
   /** Item id. */
   item?: string;
+  /**
+   * Item ids that all satisfy this objective — alternatives, not a set to collect.
+   * One entry means "hand over exactly this"; `first-in-line` has 110, meaning "any
+   * medical item". The count of alternatives is how much weight the requirement carries.
+   */
+  items?: string[];
+  /** `buildWeapon` only: mod ids the finished gun must carry. */
+  containsAll?: string[];
   questItem?: string;
   markerItem?: string;
   /** Item ids, grouped: each inner array is an alternative set. */
@@ -164,6 +172,18 @@ export interface RawTradersData {
   traders: Record<string, RawTrader>;
 }
 
+/** What a trader pays, in that trader's own currency and converted to roubles. */
+export interface RawTraderOffer {
+  /** Trader id. */
+  trader: string;
+  /** In `currency`, so never comparable across traders. */
+  price: number;
+  /** The same offer in roubles. This is the one to compare. */
+  priceRUB: number;
+  currency: string;
+  currencyItem: string;
+}
+
 export interface RawItem {
   id: string;
   /** Translation key. */
@@ -173,9 +193,98 @@ export interface RawItem {
   normalizedName: string;
   wikiLink?: string | null;
   iconLink?: string | null;
+  /** Grid footprint in stash cells. */
+  width?: number;
+  height?: number;
+  /**
+   * Category tags. `noFlea` marks an item that cannot be listed at all, which covers all
+   * three currencies; `preset` marks tarkov.dev's built-gun entries, which are not stash
+   * items.
+   */
+  types?: string[];
+  /** Character level the flea market requires before this can be listed. 0 for most. */
+  minLevelForFlea?: number | null;
+  basePrice?: number | null;
+  avg24hPrice?: number | null;
+  lastLowPrice?: number | null;
+  stackMaxSize?: number | null;
+  sellToTrader?: RawTraderOffer[];
 }
 
 export interface RawItemsData {
   items: Record<string, RawItem>;
   playerLevels?: Array<{ level: number; exp: number }>;
 }
+
+/**
+ * One line of a shopping list: a hideout level's, a barter's or a craft's.
+ *
+ * `count` is fractional for the 305 GP coin barter lines, which is why nothing may use it
+ * without rounding.
+ */
+export interface RawItemRequirement {
+  id?: string;
+  /** Item id. */
+  item: string;
+  count: number;
+  attributes?: {
+    foundInRaid?: boolean;
+    /** Craft only: the item must be present but is handed back afterwards. */
+    tool?: boolean;
+  };
+}
+
+export interface RawHideoutLevel {
+  id: string;
+  level: number;
+  constructionTime?: number;
+  itemRequirements?: RawItemRequirement[];
+  stationLevelRequirements?: Array<{ id: string; station: string; level: number }>;
+  traderRequirements?: unknown[];
+}
+
+export interface RawHideoutStation {
+  id: string;
+  /** Translation key, e.g. `hideout_area_12_name`. */
+  name: string;
+  normalizedName: string;
+  areaType: number;
+  levels: RawHideoutLevel[];
+  imageLink?: string | null;
+}
+
+/**
+ * The hideout document keys stations directly off `data`, with no wrapper property —
+ * the same shape `traders` uses. `collection` handles both.
+ */
+export type RawHideoutData = Record<string, RawHideoutStation>;
+
+export interface RawBarter {
+  id: string;
+  /** Trader id. */
+  trader: string;
+  /** Task that unlocks the offer, or null. 56 of 806 have one. */
+  taskUnlock?: string | null;
+  minTraderLevel?: number | null;
+  requiredItems: RawItemRequirement[];
+  offeredItem: RawItemRequirement;
+  restockAmount?: number;
+  buyLimit?: number;
+}
+
+export interface RawCraft {
+  id: string;
+  /** Hideout station id. */
+  station: string;
+  /** Station level the craft needs. */
+  level: number;
+  requiredItems: RawItemRequirement[];
+  requiredQuestItems?: unknown[];
+  productItem: RawItemRequirement;
+  duration?: number;
+  gameEditions?: string[];
+}
+
+/** Barters and crafts are both keyed by array index off `data`. */
+export type RawBartersData = Record<string, RawBarter>;
+export type RawCraftsData = Record<string, RawCraft>;

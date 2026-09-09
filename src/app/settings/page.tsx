@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { ConnectLogs } from '@/components/connect-logs';
+import { HideoutLevels } from '@/components/hideout-levels';
 import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { isFileSystemAccessSupported } from '@/lib/logs/fs-access-source';
 import { useAppStore } from '@/lib/store/app-store';
@@ -225,15 +226,19 @@ function DataPanel() {
 
 export default function SettingsPage() {
     return (
-        <div className='grid gap-4 lg:grid-cols-2'>
-            <div className='space-y-4'>
-                <LogPanel />
-                <ScreenshotPanel />
+        <div className='space-y-4'>
+            <div className='grid gap-4 lg:grid-cols-2'>
+                <div className='space-y-4'>
+                    <LogPanel />
+                    <ScreenshotPanel />
+                </div>
+                <div className='space-y-4'>
+                    <WipeSettings />
+                    <DataPanel />
+                </div>
             </div>
-            <div className='space-y-4'>
-                <WipeSettings />
-                <DataPanel />
-            </div>
+            {/* Twenty-six rows tall, so it belongs in neither column. */}
+            <HideoutLevels />
         </div>
     );
 }

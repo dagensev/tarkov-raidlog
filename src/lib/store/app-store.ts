@@ -21,16 +21,21 @@ import { analyzeWipes, type WipeAnalysis } from "@/lib/logs/wipe";
 import {
   denormalize,
   loadCoreBundle,
-  loadItemIndex,
+  loadItemCatalogue,
   referencedItemIds,
+  SELL_INDEX_VERSION,
   type CoreBundle,
   type ItemIndex,
+  type SellIndex,
 } from "@/lib/tarkovdev/client";
+import { loadEconomyBundle, type EconomyBundle } from "@/lib/tarkovdev/economy";
 import {
   DEFAULT_GAME_MODE,
   gameModeFromSessionMode,
   type GameMode,
 } from "@/lib/tarkovdev/endpoints";
+import { DEFAULT_SELL_VIEW, type SellView } from "@/lib/sell/filters";
+import { nextHideoutLevels } from "@/lib/sell/hideout-levels";
 import type { TaskFilter } from "@/lib/tasks/filters";
 import type { MapFilter } from "@/lib/tasks/map-filter";
 import type { SortMode } from "@/lib/tasks/sort";
@@ -81,7 +86,17 @@ interface AppState {
   /** Trimmed API documents. Denormalized on demand by the hooks. */
   bundle: CoreBundle | null;
   itemIndex: ItemIndex | null;
+  /** Hideout, barters and crafts. Arrives after the task list, with the catalogue. */
+  economy: EconomyBundle | null;
+  /** Prices and footprints for every item. The other half of the catalogue download. */
+  sellIndex: SellIndex | null;
   dataLoading: boolean;
+  /**
+   * The 16.7 MB catalogue fetch, which runs on its own schedule after the task list.
+   * Separate from `dataLoading` so the sell check can tell "downloading" from "not
+   * downloading", rather than claiming a fetch is in flight whenever its data is absent.
+   */
+  catalogueLoading: boolean;
   dataStale: boolean;
   dataError: string | null;
   /** The `Session mode:` most recently seen in the logs. */
@@ -107,6 +122,9 @@ interface AppState {
    */
   taskView: TaskView;
 
+  /** The sell check's own controls, here for the same reason `taskView` is. */
+  sellView: SellView;
+
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
@@ -115,8 +133,10 @@ interface AppState {
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
   setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
+  setHideoutLevel: (stationId: string, level: number | null) => Promise<void>;
   setMapFilter: (filter: MapFilter) => void;
   setTaskView: (patch: Partial<TaskView>) => void;
+  setSellView: (patch: Partial<SellView>) => void;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
 }
@@ -211,7 +231,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   bundle: null,
   itemIndex: null,
+  economy: null,
+  sellIndex: null,
   dataLoading: false,
+  catalogueLoading: false,
   dataStale: false,
   dataError: null,
   sessionMode: null,
@@ -222,15 +245,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   trail: [],
   mapFilter: null,
   taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
+  sellView: DEFAULT_SELL_VIEW,
 
   async hydrate() {
-    const [settings, manualTasks, events, bundle, itemIndex] = await Promise.all([
-      db.loadSettings(),
-      db.get("manualTasks"),
-      db.get("events"),
-      db.get("tarkovBundle"),
-      db.get("itemIndex"),
-    ]);
+    const [settings, manualTasks, events, bundle, itemIndex, economy, sellIndex] =
+      await Promise.all([
+        db.loadSettings(),
+        db.get("manualTasks"),
+        db.get("events"),
+        db.get("tarkovBundle"),
+        db.get("itemIndex"),
+        db.get("economyBundle"),
+        db.get("sellIndex"),
+      ]);
 
     set({
       settings,
@@ -238,6 +265,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       events: events ?? [],
       bundle: bundle ?? null,
       itemIndex: itemIndex ?? null,
+      economy: economy ?? null,
+      sellIndex: sellIndex ?? null,
       dataStale: isStale(bundle),
       sessionMode: sessionModeFrom(events ?? []),
     });
@@ -330,23 +359,34 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshData(force = false) {
     const state = get();
     const mode = resolveGameMode(state);
-    const fresh = state.bundle && state.bundle.mode === mode && !isStale(state.bundle);
-    if (fresh && !force) return;
-    if (state.dataLoading) return;
+    const bundleFresh = Boolean(
+      state.bundle && state.bundle.mode === mode && !isStale(state.bundle),
+    );
 
-    set({ dataLoading: true, dataError: null });
-    try {
-      const bundle = await loadCoreBundle(mode);
-      await db.set("tarkovBundle", bundle);
-      set({ bundle, dataStale: false, dataLoading: false });
+    if (!bundleFresh || force) {
+      if (state.dataLoading) return;
+      set({ dataLoading: true, dataError: null });
+      try {
+        const bundle = await loadCoreBundle(mode);
+        await db.set("tarkovBundle", bundle);
+        set({ bundle, dataStale: false, dataLoading: false });
 
-      // Item names are only needed to label keys, and cost a 15.8 MB download, so they
-      // arrive after the task list is already on screen.
-      void loadItems(bundle, set);
-    } catch (error) {
-      // Keep whatever is cached; a stale task list beats an empty screen.
-      set({ dataError: (error as Error).message, dataLoading: false });
+        // The item catalogue costs a 16.7 MB download and only labels keys on the task
+        // screen, so it arrives after the list is already up. The sell check's data
+        // rides along with it rather than triggering a second download of its own.
+        void loadCatalogue(bundle, set);
+      } catch (error) {
+        // Keep whatever is cached; a stale task list beats an empty screen.
+        set({ dataError: (error as Error).message, dataLoading: false });
+      }
+      return;
     }
+
+    // The bundle can be fresh while the catalogue is not: it is a separate and much
+    // larger fetch, so it can be missing entirely on the first run against an existing
+    // cache, a day behind, or left over from another game mode. Returning early on a
+    // fresh bundle alone left the sell check empty until someone pressed refresh.
+    if (state.bundle && catalogueBehind(state, mode)) void loadCatalogue(state.bundle, set);
   },
 
   async setManualTask(taskId, status) {
@@ -357,12 +397,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     await db.set("manualTasks", manualTasks);
   },
 
+  /**
+   * Record one station's built level.
+   *
+   * Its own action rather than a `updateSettings` call from the editor, because the whole
+   * record has to be read at click time. Building the new map in the component reads the
+   * value React rendered with, and two clicks inside one frame then both start from the
+   * same map — the second silently dropping the first. Filling in all 26 stations at
+   * speed lost one almost every time. `setManualTask` reads through `get()` for the same
+   * reason.
+   */
+  async setHideoutLevel(stationId, level) {
+    const settings = {
+      ...get().settings,
+      hideoutLevels: nextHideoutLevels(get().settings.hideoutLevels, stationId, level),
+    };
+    set({ settings });
+    await db.set("settings", settings);
+  },
+
   setMapFilter(mapFilter) {
     set({ mapFilter });
   },
 
   setTaskView(patch) {
     set({ taskView: { ...get().taskView, ...patch } });
+  },
+
+  setSellView(patch) {
+    set({ sellView: { ...get().sellView, ...patch } });
   },
 
   async updateSettings(patch) {
@@ -390,13 +453,69 @@ function resolveGameMode(state: Pick<AppState, "settings" | "sessionMode">): Gam
   );
 }
 
-async function loadItems(bundle: CoreBundle, set: SetState): Promise<void> {
+/**
+ * Everything the task list did not need: the item catalogue and the three documents that
+ * say what consumes items.
+ *
+ * The economy documents go first because they are 437 KB against the catalogue's 16.7 MB,
+ * so a failure there still leaves the big download running. Each half is caught on its
+ * own: neither is worth surfacing as a failure, since the task list is already on screen
+ * and both degrade to something usable.
+ */
+/**
+ * Whether either half of the catalogue is missing, a day old, from another mode, or of
+ * an older shape than the page now reads.
+ */
+export function catalogueBehind(
+  state: Pick<AppState, "economy" | "sellIndex">,
+  mode: GameMode,
+): boolean {
+  return (
+    state.economy?.mode !== mode ||
+    state.sellIndex?.mode !== mode ||
+    state.sellIndex?.version !== SELL_INDEX_VERSION ||
+    isStale(state.economy ?? undefined) ||
+    isStale(state.sellIndex ?? undefined)
+  );
+}
+
+/**
+ * Latch on the 16.7 MB download.
+ *
+ * Outside the store like the watcher and the timer: it guards re-entry across an await,
+ * which reactive state cannot do — two callers both read `false` before either writes.
+ */
+let catalogueInFlight = false;
+
+async function loadCatalogue(bundle: CoreBundle, set: SetState): Promise<void> {
+  if (catalogueInFlight) return;
+  catalogueInFlight = true;
+  set({ catalogueLoading: true });
+
   try {
-    const index = await loadItemIndex(bundle.mode, referencedItemIds(bundle.tasks));
-    await db.set("itemIndex", index);
-    set({ itemIndex: index });
-  } catch {
-    // Keys fall back to showing an id; not worth surfacing as a failure.
+    try {
+      const economy = await loadEconomyBundle(bundle.mode);
+      await db.set("economyBundle", economy);
+      set({ economy });
+    } catch {
+      // 437 KB against the catalogue's 16.7 MB, so it goes first: failing here must not
+      // take the big download down with it.
+    }
+
+    try {
+      const { index, sell } = await loadItemCatalogue(
+        bundle.mode,
+        referencedItemIds(bundle.tasks),
+      );
+      await db.set("itemIndex", index);
+      await db.set("sellIndex", sell);
+      set({ itemIndex: index, sellIndex: sell });
+    } catch {
+      // Keys fall back to showing an id, as they did before the catalogue existed.
+    }
+  } finally {
+    catalogueInFlight = false;
+    set({ catalogueLoading: false });
   }
 }
 

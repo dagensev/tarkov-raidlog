@@ -1,6 +1,7 @@
 import {
   DEFAULT_LANGUAGE,
   endpointPath,
+  type EndpointName,
   type GameMode,
 } from "./endpoints";
 import type {
@@ -86,6 +87,22 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
 }
 
 /**
+ * GET one API document, or its translation file when `translated`.
+ *
+ * Every endpoint fetch is these same two lines. Having them in one place is what makes
+ * adding hideout, barters and crafts a matter of naming them.
+ */
+export function fetchEndpoint<T>(
+  mode: GameMode,
+  name: EndpointName,
+  options: FetchOptions = {},
+  translated = false,
+): Promise<T> {
+  const lang = translated ? (options.language ?? DEFAULT_LANGUAGE) : undefined;
+  return fetchJson<T>(endpointPath(mode, name, lang), options);
+}
+
+/**
  * The documents the app needs, already trimmed.
  *
  * The maps document is ~9.5 MB, almost all of it mobs and loot containers we never read,
@@ -139,9 +156,8 @@ export async function loadCoreBundle(
   mode: GameMode,
   options: FetchOptions = {},
 ): Promise<CoreBundle> {
-  const lang = options.language ?? DEFAULT_LANGUAGE;
-  const get = <T>(name: Parameters<typeof endpointPath>[1], withLang?: boolean) =>
-    fetchJson<T>(endpointPath(mode, name, withLang ? lang : undefined), options);
+  const get = <T>(name: EndpointName, withLang?: boolean) =>
+    fetchEndpoint<T>(mode, name, options, withLang);
 
   const [tasks, tasksText, maps, mapsText, traders, tradersText] = await Promise.all([
     get<RawDocument<RawTasksData>>("tasks"),
@@ -175,7 +191,7 @@ export async function loadCoreBundle(
  * the trader objects directly off `data`. Reading only the named property silently
  * yielded an empty trader list, which showed up as raw ids in place of names.
  */
-function collection<T>(data: unknown, key: string): Record<string, T> {
+export function collection<T>(data: unknown, key: string): Record<string, T> {
   const doc = data as Record<string, unknown> | null | undefined;
   if (!doc) return {};
   const named = doc[key];
@@ -203,38 +219,144 @@ export function referencedItemIds(tasks: Record<string, RawTask>): string[] {
 
 export type ItemIndex = Record<string, ItemRef>;
 
+/** Prices and footprint for one item — everything the sell check puts on a row. */
+export interface SellItem {
+  id: string;
+  name: string;
+  shortName: string | null;
+  /** Also the tarkov.dev page: `https://tarkov.dev/item/<normalizedName>`. */
+  normalizedName: string;
+  /** Grid footprint in stash cells. */
+  width: number;
+  height: number;
+  /** Cannot be listed on the flea market at all, so no flea price means anything. */
+  noFlea: boolean;
+  /**
+   * Character level needed before this can be listed, or 0 for no requirement beyond the
+   * flea itself. Every item carries one, including the restricted ones, where it means
+   * nothing — read it only when `noFlea` is false.
+   */
+  minLevelForFlea: number;
+  avg24hPrice: number | null;
+  lastLowPrice: number | null;
+  basePrice: number | null;
+  /** The best offer across traders, chosen on roubles. */
+  bestTrader: { traderId: string; priceRUB: number } | null;
+  wikiLink: string | null;
+  /**
+   * Only stored when it is not the derivable `assets.tarkov.dev` URL, which covers 5207
+   * of 5320 items. Read it through `itemIconLink`, never directly.
+   */
+  iconLink?: string;
+}
+
 /**
- * Names for a specific set of items.
+ * Bump whenever `SellItem` gains a field the page reads.
  *
- * The whole item catalogue has to be downloaded to get them — there is no per-item
- * endpoint — but only the referenced handful is kept, so what reaches the cache is a few
- * kilobytes rather than 15.8 MB.
+ * A cached index is kept for a day, so without this a new field renders blank until the
+ * next refresh — present in the code, absent from every existing reader's cache, and
+ * indistinguishable from a bug. A mismatch makes the catalogue count as behind.
  */
-export async function loadItemIndex(
+export const SELL_INDEX_VERSION = 1;
+
+export interface SellIndex {
+  mode: GameMode;
+  /** Shape of the entries, against `SELL_INDEX_VERSION`. Absent on pre-versioned caches. */
+  version?: number;
+  /** When the catalogue was downloaded. Prices are only ever as fresh as this. */
+  fetchedAt: number;
+  /** Every item that can sit in a stash, keyed by id. Presets excluded. */
+  items: Record<string, SellItem>;
+}
+
+/** The icon URL, derived where it follows the usual pattern. */
+export function itemIconLink(item: SellItem): string {
+  return item.iconLink ?? `https://assets.tarkov.dev/${item.id}-icon.webp`;
+}
+
+/** The tarkov.dev page, which follows `normalizedName` for every item in the catalogue. */
+export function itemPageLink(item: SellItem): string {
+  return `https://tarkov.dev/item/${item.normalizedName}`;
+}
+
+/** Trader offers are quoted in the trader's own currency, so only roubles compare. */
+function bestTraderOffer(item: RawItem): { traderId: string; priceRUB: number } | null {
+  let best: { traderId: string; priceRUB: number } | null = null;
+  for (const offer of item.sellToTrader ?? []) {
+    if (!offer?.trader || typeof offer.priceRUB !== "number") continue;
+    if (!best || offer.priceRUB > best.priceRUB) {
+      best = { traderId: offer.trader, priceRUB: offer.priceRUB };
+    }
+  }
+  return best;
+}
+
+/**
+ * Both projections of the item catalogue, from one download.
+ *
+ * The catalogue is 16.7 MB and there is no per-item endpoint, so anything wanting a
+ * single item fact pays for all of them. Returning two projections rather than one merged
+ * shape leaves the task list's thin `ItemRef` — and its cache entry — exactly as it was:
+ * `index` holds names for the handful of key items tasks reference, `sell` holds prices
+ * and footprints for everything.
+ */
+export async function loadItemCatalogue(
   mode: GameMode,
-  ids: readonly string[],
+  keyIds: readonly string[],
   options: FetchOptions = {},
-): Promise<ItemIndex> {
-  if (ids.length === 0) return {};
-  const lang = options.language ?? DEFAULT_LANGUAGE;
+): Promise<{ index: ItemIndex; sell: SellIndex }> {
   const [items, text] = await Promise.all([
-    fetchJson<RawDocument<RawItemsData>>(endpointPath(mode, "items"), options),
-    fetchJson<RawDocument<TranslationDictionary>>(endpointPath(mode, "items", lang), options),
+    fetchEndpoint<RawDocument<RawItemsData>>(mode, "items", options),
+    fetchEndpoint<RawDocument<TranslationDictionary>>(mode, "items", options, true),
   ]);
 
-  const wanted = new Set(ids);
+  const wanted = new Set(keyIds);
   const index: ItemIndex = {};
+  const sell: Record<string, SellItem> = {};
+
   for (const [id, item] of Object.entries(collection<RawItem>(items.data, "items"))) {
-    if (!wanted.has(id)) continue;
-    index[id] = {
+    const name = text.data[item.name] ?? item.normalizedName ?? id;
+    const shortName = text.data[item.shortName] ?? null;
+
+    if (wanted.has(id)) {
+      index[id] = {
+        id,
+        name,
+        shortName,
+        iconLink: item.iconLink ?? null,
+        wikiLink: item.wikiLink ?? null,
+      };
+    }
+
+    // Presets are tarkov.dev's pre-built gun entries, not things that sit in a stash.
+    // Left in they would appear in every weapon search without ever being sellable.
+    const types = item.types ?? [];
+    if (types.includes("preset")) continue;
+
+    const entry: SellItem = {
       id,
-      name: text.data[item.name] ?? item.normalizedName ?? id,
-      shortName: text.data[item.shortName] ?? null,
-      iconLink: item.iconLink ?? null,
+      name,
+      shortName,
+      normalizedName: item.normalizedName,
+      width: item.width ?? 1,
+      height: item.height ?? 1,
+      noFlea: types.includes("noFlea"),
+      minLevelForFlea: item.minLevelForFlea ?? 0,
+      avg24hPrice: item.avg24hPrice ?? null,
+      lastLowPrice: item.lastLowPrice ?? null,
+      basePrice: item.basePrice ?? null,
+      bestTrader: bestTraderOffer(item),
       wikiLink: item.wikiLink ?? null,
     };
+    const derivable = `https://assets.tarkov.dev/${id}-icon.webp`;
+    if (item.iconLink && item.iconLink !== derivable) entry.iconLink = item.iconLink;
+    sell[id] = entry;
   }
-  return index;
+
+  return {
+    index,
+    sell: { mode, version: SELL_INDEX_VERSION, fetchedAt: Date.now(), items: sell },
+  };
 }
 
 // --- denormalization ---------------------------------------------------------------
@@ -293,6 +415,7 @@ export function denormalize(bundle: CoreBundle, items?: ItemIndex): TarkovData {
     kappaRequired: raw.kappaRequired ?? null,
     lightkeeperRequired: raw.lightkeeperRequired ?? null,
     factionName: raw.factionName ?? "Any",
+    restartable: raw.restartable ?? false,
     wikiLink: raw.wikiLink ?? null,
     trader: traderRef(raw.trader),
     map: mapRef(raw.map),
@@ -314,6 +437,10 @@ export function denormalize(bundle: CoreBundle, items?: ItemIndex): TarkovData {
       count: objective.count ?? null,
       foundInRaid: objective.foundInRaid ?? null,
       item: objective.item ? itemRef(objective.item, items) : null,
+      // Ids, not refs: 877 distinct items appear across these lists and the key-item
+      // index holds ~58 of them, so resolving here would mostly produce placeholders.
+      items: objective.items ?? [],
+      containsAll: objective.containsAll ?? [],
       questItem: null,
       markerItem: objective.markerItem ? itemRef(objective.markerItem, items) : null,
       targetNames: objective.targetNames?.map((name) => t(name, name)) ?? null,

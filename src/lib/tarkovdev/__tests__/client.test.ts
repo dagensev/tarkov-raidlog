@@ -4,8 +4,12 @@ import {
   TarkovDevError,
   denormalize,
   fetchJson,
+  itemIconLink,
+  itemPageLink,
+  loadItemCatalogue,
   referencedItemIds,
   type CoreBundle,
+  type SellItem,
 } from "../client";
 import { endpointPath, gameModeFromSessionMode } from "../endpoints";
 import type { RawTask } from "../raw-types";
@@ -270,5 +274,136 @@ describe("referencedItemIds", () => {
   it("collects key and objective item ids", () => {
     // Only these need names, which is why the 15.8 MB item catalogue is filtered down.
     expect(referencedItemIds(bundle().tasks)).toEqual(["key1"]);
+  });
+});
+
+describe("loadItemCatalogue", () => {
+  /** Two items: one a key a task references, one a preset, plus a normal barter item. */
+  function itemsDoc() {
+    return {
+      data: {
+        items: {
+          key1: {
+            id: "key1",
+            name: "key1 Name",
+            shortName: "key1 Short",
+            normalizedName: "dorm-key",
+            iconLink: "https://assets.tarkov.dev/key1-icon.webp",
+            wikiLink: "https://wiki/key1",
+            width: 1,
+            height: 1,
+            types: ["keys"],
+            basePrice: 100,
+            avg24hPrice: 5000,
+            lastLowPrice: 4800,
+            sellToTrader: [
+              { trader: "peacekeeper", price: 40, priceRUB: 4400, currency: "USD" },
+              { trader: "therapist", price: 4600, priceRUB: 4600, currency: "RUB" },
+            ],
+          },
+          lamp: {
+            id: "lamp",
+            name: "lamp Name",
+            shortName: "lamp Short",
+            normalizedName: "energy-saving-lamp",
+            iconLink: "https://cdn.example/custom-lamp.webp",
+            width: 1,
+            height: 1,
+            types: ["barter"],
+            avg24hPrice: 32513,
+            sellToTrader: [],
+          },
+          m4: {
+            id: "m4",
+            name: "m4 Name",
+            shortName: "m4 Short",
+            normalizedName: "m4a1-default",
+            types: ["gun", "preset"],
+          },
+        },
+      },
+    };
+  }
+
+  const text = { data: { "key1 Name": "Dorm room key", "key1 Short": "Dorm", "lamp Name": "Lamp" } };
+
+  function fetchImpl() {
+    return vi.fn<typeof fetch>(async (url) =>
+      response(200, String(url).endsWith("_en") ? text : itemsDoc()),
+    );
+  }
+
+  it("builds both projections from one pair of requests", async () => {
+    // The catalogue is 16.7 MB. Downloading it twice for two shapes is the thing to avoid.
+    const impl = fetchImpl();
+    await loadItemCatalogue("regular", ["key1"], { ...opts, fetchImpl: impl });
+    expect(impl).toHaveBeenCalledTimes(2);
+  });
+
+  it("restricts the name index to the requested ids", async () => {
+    const { index } = await loadItemCatalogue("regular", ["key1"], {
+      ...opts,
+      fetchImpl: fetchImpl(),
+    });
+    expect(Object.keys(index)).toEqual(["key1"]);
+    expect(index.key1).toMatchObject({ name: "Dorm room key", shortName: "Dorm" });
+  });
+
+  it("keeps every non-preset item in the sell index, requested or not", async () => {
+    const { sell } = await loadItemCatalogue("regular", ["key1"], {
+      ...opts,
+      fetchImpl: fetchImpl(),
+    });
+    expect(Object.keys(sell.items).sort()).toEqual(["key1", "lamp"]);
+  });
+
+  it("drops presets, which are built guns rather than stash items", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.m4).toBeUndefined();
+  });
+
+  it("a preset is excluded from the sell index even when it is also a requested key", async () => {
+    const { index, sell } = await loadItemCatalogue("regular", ["m4"], {
+      ...opts,
+      fetchImpl: fetchImpl(),
+    });
+    expect(index.m4).toBeDefined();
+    expect(sell.items.m4).toBeUndefined();
+  });
+
+  it("picks the best trader on roubles, never on the quoted price", async () => {
+    // Peacekeeper's 40 is dollars. Comparing quoted prices would pick the smaller offer.
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.key1.bestTrader).toEqual({ traderId: "therapist", priceRUB: 4600 });
+  });
+
+  it("reports no trader offer rather than a zero one", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.lamp.bestTrader).toBeNull();
+  });
+
+  it("omits an icon link that follows the derivable pattern, keeps one that does not", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.key1.iconLink).toBeUndefined();
+    expect(sell.items.lamp.iconLink).toBe("https://cdn.example/custom-lamp.webp");
+    expect(itemIconLink(sell.items.key1)).toBe("https://assets.tarkov.dev/key1-icon.webp");
+    expect(itemIconLink(sell.items.lamp)).toBe("https://cdn.example/custom-lamp.webp");
+  });
+
+  it("derives the tarkov.dev page from the normalized name", () => {
+    expect(itemPageLink({ normalizedName: "energy-saving-lamp" } as SellItem)).toBe(
+      "https://tarkov.dev/item/energy-saving-lamp",
+    );
+  });
+
+  it("flags an item that cannot be listed on the flea", async () => {
+    const doc = itemsDoc();
+    doc.data.items.lamp.types = ["barter", "noFlea"];
+    const impl = vi.fn<typeof fetch>(async (url) =>
+      response(200, String(url).endsWith("_en") ? text : doc),
+    );
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: impl });
+    expect(sell.items.lamp.noFlea).toBe(true);
+    expect(sell.items.key1.noFlea).toBe(false);
   });
 });

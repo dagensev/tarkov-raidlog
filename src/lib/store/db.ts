@@ -2,7 +2,8 @@ import { openDB, type IDBPDatabase } from "idb";
 
 import type { LogEvent } from "@/lib/logs/events";
 import type { TaskStatus } from "@/lib/logs/progress";
-import type { CoreBundle, ItemIndex } from "@/lib/tarkovdev/client";
+import type { CoreBundle, ItemIndex, SellIndex } from "@/lib/tarkovdev/client";
+import type { EconomyBundle } from "@/lib/tarkovdev/economy";
 import type { GameMode } from "@/lib/tarkovdev/endpoints";
 
 /**
@@ -24,6 +25,20 @@ const STORE = "kv";
 export interface Settings {
   /** Trader loyalty by trader id. Partial, and treated as "unverified" where missing. */
   traderLevels: Record<string, number>;
+  /**
+   * Built hideout level by station id. The logs never mention the hideout, so this is the
+   * only source there is.
+   *
+   * A missing station means "not told", which the sell check treats as "you might still
+   * need it". An explicit 0 means "not built", which is a different thing: it keeps the
+   * station's own upgrades on the keep list while dropping the crafts you cannot run.
+   */
+  hideoutLevels: Record<string, number>;
+  /**
+   * Character level, typed on the sell check, where it hides items the flea will not let
+   * you list yet. The logs never state it. Null means "do not filter on it".
+   */
+  playerLevel: number | null;
   /** Profile generation id chosen as the current wipe, or null to use auto-detection. */
   wipeId: string | null;
   /** Map chosen by hand, overriding detection. */
@@ -38,6 +53,10 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   traderLevels: {},
+  hideoutLevels: {},
+  // The highest requirement any item carries, so the default hides nothing and only
+  // lowering it narrows the list.
+  playerLevel: 40,
   wipeId: null,
   mapOverride: null,
   gameMode: null,
@@ -56,6 +75,13 @@ interface StoredValues {
   tarkovBundle: CoreBundle;
   /** Names for the handful of items tasks reference. Loaded after the core bundle. */
   itemIndex: ItemIndex;
+  /** Hideout stations, barters and crafts — the things that consume stash items. */
+  economyBundle: EconomyBundle;
+  /**
+   * Prices and footprints for every item. Kept apart from `itemIndex` so the task list's
+   * thin refs, and their cache entry, are untouched by the sell check.
+   */
+  sellIndex: SellIndex;
   /** Squad you are currently in, if any. The token is also the invite. */
   squadToken: string;
   /** Who you appear as to squadmates. Random id, typed nickname. */
@@ -99,6 +125,7 @@ export async function loadSettings(): Promise<Settings> {
 /** How long a cached bundle is considered fresh. */
 export const BUNDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
-export function isStale(bundle: CoreBundle | undefined): boolean {
-  return !bundle || Date.now() - bundle.fetchedAt > BUNDLE_TTL_MS;
+/** One rule for all three cached documents; each stamps the same `fetchedAt`. */
+export function isStale(document: { fetchedAt: number } | undefined): boolean {
+  return !document || Date.now() - document.fetchedAt > BUNDLE_TTL_MS;
 }

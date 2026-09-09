@@ -176,6 +176,8 @@ describe("mapsWithTasks", () => {
             __typename: "visit",
             zones: [],
             possibleLocations: [],
+            items: [],
+            containsAll: [],
           },
         ]
       : [],
@@ -248,6 +250,8 @@ describe("taskIsOnMap", () => {
           __typename: "visit",
           zones: [],
           possibleLocations: [],
+          items: [],
+          containsAll: [],
         },
       ],
     } as Task;

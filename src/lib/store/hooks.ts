@@ -6,7 +6,11 @@ import { computeAvailability, type TaskAvailability } from "@/lib/graph/availabi
 import { buildTaskGraph } from "@/lib/graph/task-graph";
 import { deriveTaskStates, summarize, type TaskState } from "@/lib/logs/progress";
 import type { ProfileGeneration } from "@/lib/logs/wipe";
-import { denormalize } from "@/lib/tarkovdev/client";
+import { buildKeepList, type KeepList } from "@/lib/sell/keep-list";
+import { searchItems } from "@/lib/sell/search";
+import { keepRows, rowsFor, type SellRow } from "@/lib/sell/verdict";
+import { denormalize, type SellIndex } from "@/lib/tarkovdev/client";
+import type { EconomyBundle } from "@/lib/tarkovdev/economy";
 import { mapsWithTasks, resolveMap } from "@/lib/tarkovdev/maps";
 import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
 import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
@@ -22,6 +26,8 @@ import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
 
 const EMPTY_TASKS: Task[] = [];
 const EMPTY_MAPS: GameMap[] = [];
+const EMPTY_KEEP: KeepList = new Map();
+const EMPTY_ROWS: SellRow[] = [];
 
 /**
  * The API's normalized documents, reshaped into nested objects.
@@ -164,4 +170,70 @@ export function useProgressCounts() {
       total: tasks.length,
     };
   }, [states, tasks]);
+}
+
+/**
+ * Hideout, barter and craft data, once it matches the loaded task set.
+ *
+ * The mode check matters because only one copy of each document is cached: switching to
+ * PvE refetches everything, and until it lands the cached copy belongs to the mode you
+ * just left. Serving that would put regular-mode barters on a PvE sell check.
+ */
+export function useEconomy(): EconomyBundle | null {
+  const economy = useAppStore((s) => s.economy);
+  const mode = useGameMode();
+  return economy && economy.mode === mode ? economy : null;
+}
+
+export function useSellIndex(): SellIndex | null {
+  const index = useAppStore((s) => s.sellIndex);
+  const mode = useGameMode();
+  return index && index.mode === mode ? index : null;
+}
+
+/** Trader id to name, for labelling the barters that want an item. */
+export function useTraderNames(): ReadonlyMap<string, string> {
+  const data = useTarkovData();
+  return useMemo(
+    () => new Map((data?.traders ?? []).map((trader) => [trader.id, trader.name])),
+    [data],
+  );
+}
+
+/** What still wants each item, and why. Empty until the economy documents arrive. */
+export function useKeepList(): KeepList {
+  const tasks = useTasks();
+  const taskStates = useTaskStates();
+  const economy = useEconomy();
+  const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
+  const traderLevels = useAppStore((s) => s.settings.traderLevels);
+  const traderNames = useTraderNames();
+
+  return useMemo(
+    () =>
+      economy
+        ? buildKeepList({ tasks, taskStates, economy, hideoutLevels, traderLevels, traderNames })
+        : EMPTY_KEEP,
+    [tasks, taskStates, economy, hideoutLevels, traderLevels, traderNames],
+  );
+}
+
+/**
+ * The rows the sell check renders.
+ *
+ * With no query this is the keep list, which is the browsing view. With one it is a
+ * search across the whole catalogue, which is the only way an item nothing wants can
+ * reach the screen at all.
+ */
+export function useSellRows(): SellRow[] {
+  const keep = useKeepList();
+  const index = useSellIndex();
+  const traderNames = useTraderNames();
+  const query = useAppStore((s) => s.sellView.query);
+
+  return useMemo(() => {
+    if (!index) return EMPTY_ROWS;
+    if (!query.trim()) return keepRows(keep, index, traderNames);
+    return rowsFor(searchItems(index, query), keep, traderNames);
+  }, [keep, index, traderNames, query]);
 }

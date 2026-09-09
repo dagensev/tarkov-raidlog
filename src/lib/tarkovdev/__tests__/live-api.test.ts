@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { buildKeepList } from "@/lib/sell/keep-list";
+
 import { denormalize, loadCoreBundle, referencedItemIds, type CoreBundle } from "../client";
+import {
+  CURRENCY_ITEM_IDS,
+  economyItemIds,
+  loadEconomyBundle,
+  type EconomyBundle,
+} from "../economy";
 import { mapsWithTasks, resolveMap, taskIsOnMap } from "../maps";
 
 /**
@@ -171,5 +179,72 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
       ].join("\n"),
     );
     expect(data.tasks.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The economy documents, probed separately so an outage in one does not skip the other.
+ */
+async function probeEconomy(): Promise<EconomyBundle | null> {
+  if (skip) return null;
+  try {
+    return await loadEconomyBundle("pvp-season", { attempts: 1, backoffMs: 0 });
+  } catch {
+    return null;
+  }
+}
+
+const economy = await probeEconomy();
+
+describe.skipIf(!economy || !bundle)("live economy documents", () => {
+  it("returns every hideout station", () => {
+    expect(economy!.stations.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it("resolves station names through the translation document", () => {
+    // Left unresolved these read `hideout_area_12_name`, which is what the raw doc holds.
+    const unresolved = economy!.stations.filter((s) => s.name.startsWith("hideout_area_"));
+    expect(unresolved).toEqual([]);
+  });
+
+  it("returns barters and crafts", () => {
+    expect(economy!.barters.length).toBeGreaterThan(400);
+    expect(economy!.crafts.length).toBeGreaterThan(100);
+  });
+
+  it("points every craft at a station the hideout document contains", () => {
+    const known = new Set(economy!.stations.map((s) => s.id));
+    const orphans = economy!.crafts.filter((c) => !known.has(c.stationId)).map((c) => c.id);
+    expect(orphans).toEqual([]);
+  });
+
+  it("never reports money as an item something wants", () => {
+    // The Library alone asks for 400,000 roubles, and there is no `currency` item type
+    // to spot that with, so the exclusion is by id and worth pinning against live data.
+    const ids = economyItemIds(economy!);
+    expect(ids.filter((id) => CURRENCY_ITEM_IDS.has(id))).toEqual([]);
+  });
+
+  it("still has at least one sellItem objective listing over a hundred alternatives", () => {
+    // This is the trap `CONSUMING_OBJECTIVES` exists for. If it ever stops being true the
+    // exclusion is no longer load-bearing and the keep list should be re-measured.
+    const widest = Object.values(bundle!.tasks)
+      .flatMap((task) => task.objectives ?? [])
+      .filter((objective) => objective.type === "sellItem")
+      .reduce((most, objective) => Math.max(most, (objective.items ?? []).length), 0);
+    expect(widest).toBeGreaterThan(100);
+  });
+
+  it("keeps the keep list to a plausible slice of the catalogue", () => {
+    // A canary on an upstream shape change: measured at 1037 of 5320 items. Either bound
+    // being crossed means a document changed shape, not that the game changed.
+    const keep = buildKeepList({
+      tasks: denormalize(bundle!).tasks,
+      taskStates: new Map(),
+      economy: economy!,
+      hideoutLevels: {},
+    });
+    expect(keep.size).toBeGreaterThan(800);
+    expect(keep.size).toBeLessThan(1400);
   });
 });

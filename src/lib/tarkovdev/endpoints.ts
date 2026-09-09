@@ -46,7 +46,14 @@ export function gameModeFromSessionMode(sessionMode: string | undefined): GameMo
   }
 }
 
-export type EndpointName = "tasks" | "maps" | "traders" | "items" | "hideout";
+export type EndpointName =
+  | "tasks"
+  | "maps"
+  | "traders"
+  | "items"
+  | "hideout"
+  | "barters"
+  | "crafts";
 
 /** Path to a data document, or its translation file when `lang` is given. */
 export function endpointPath(mode: GameMode, name: EndpointName, lang?: string): string {
