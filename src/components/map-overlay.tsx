@@ -6,7 +6,15 @@ import type { ScreenshotPosition } from "@/lib/logs/screenshots";
 import type { MapCalibration, MapFloor } from "@/lib/maps/calibration";
 import type { ObjectivePin } from "@/lib/maps/pins";
 import { project } from "@/lib/maps/project";
-import { FITTED, fitBox, type Size } from "@/lib/maps/viewport";
+import {
+  FITTED,
+  clampView,
+  fitBox,
+  zoomAt,
+  type Point,
+  type Size,
+  type View,
+} from "@/lib/maps/viewport";
 import type { GameMap } from "@/lib/tarkovdev/types";
 import { cx } from "./ui";
 
@@ -73,6 +81,15 @@ function prepare(
   return { svg: svg as SVGSVGElement, aspect: width / height };
 }
 
+/** A cursor in the frame the transform uses: CSS pixels from the open area's centre. */
+function pointerAt(event: { clientX: number; clientY: number }, node: HTMLElement): Point {
+  const rect = node.getBoundingClientRect();
+  return {
+    x: event.clientX - (rect.left + rect.width / 2),
+    y: event.clientY - (rect.top + rect.height / 2),
+  };
+}
+
 export function MapOverlay({
   map,
   calibration,
@@ -135,7 +152,74 @@ export function MapOverlay({
     [prepared, area],
   );
 
-  const view = FITTED;
+  const [raw, setRaw] = useState<View>(FITTED);
+
+  // Clamped at render rather than corrected in an effect, for the same reason `floor` is
+  // derived in `objective-map.tsx`: pushing a corrected value back into state from an
+  // effect is exactly what `react-hooks/set-state-in-effect` exists to stop. It also makes
+  // a window resize free — the limits fall out of the new `area` on the next render, with
+  // an existing zoom left alone. Clamping is idempotent, so nothing drifts.
+  const view = clampView(raw, box, area);
+
+  // The wheel listener is registered by hand because React attaches `wheel` at the root as
+  // a *passive* listener, so `preventDefault()` inside an `onWheel` prop does nothing and
+  // the raid board scrolls underneath the map. Re-registers when the box or area changes,
+  // which is cheap and beats stashing both in refs.
+  useEffect(() => {
+    const node = areaRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      // Firefox reports whole lines rather than pixels. Exponential so that zooming in and
+      // back out by the same scroll distance returns you to where you started.
+      const distance = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const factor = Math.exp(-distance * 0.0015);
+      const at = pointerAt(event, node);
+      setRaw((current) => zoomAt(clampView(current, box, area), factor, at, box, area));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [box, area]);
+
+  /** A drag in flight. `moved` stays false until the pointer clears the slop below. */
+  const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  /** Whether the gesture that just ended was a drag. Read by pin clicks in Task 4. */
+  const dragged = useRef(false);
+
+  // Deliberately *not* pointer capture. Capturing on the stage would retarget the click
+  // that follows to the stage itself, and a pin would never see its own click. Window
+  // listeners keep native click dispatch intact and still follow the pointer off-screen.
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const active = drag.current;
+      if (!active || active.id !== event.pointerId) return;
+      const dx = event.clientX - active.x;
+      const dy = event.clientY - active.y;
+      // A few pixels of slop, so a click on a pin with a shaky hand is still a click.
+      if (!active.moved && Math.hypot(dx, dy) < 4) return;
+      active.moved = true;
+      active.x = event.clientX;
+      active.y = event.clientY;
+      setRaw((current) => {
+        const from = clampView(current, box, area);
+        return clampView({ ...from, x: from.x + dx, y: from.y + dy }, box, area);
+      });
+    };
+    const end = (event: PointerEvent) => {
+      const active = drag.current;
+      if (!active || active.id !== event.pointerId) return;
+      dragged.current = active.moved;
+      drag.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [box, area]);
 
   // A ref callback keyed on `prepared`, not an effect: the holder only enters the tree
   // once the area has been measured, which is a render *after* `prepared` arrives, so an
@@ -225,6 +309,15 @@ export function MapOverlay({
               {pins.length} pins
             </button>
             <button
+              type="button"
+              onClick={() => setRaw(FITTED)}
+              disabled={view.scale === 1}
+              title="Fit the whole map on screen"
+              className={cx(chip, chipOff, "disabled:cursor-not-allowed disabled:opacity-40")}
+            >
+              Fit
+            </button>
+            <button
               ref={closeRef}
               type="button"
               onClick={onClose}
@@ -240,7 +333,20 @@ export function MapOverlay({
 
       <div
         ref={attachArea}
-        className="relative flex flex-1 touch-none items-center justify-center overflow-hidden bg-ground-2 select-none"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          dragged.current = false;
+          drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+        }}
+        onDoubleClick={(event) => {
+          const at = pointerAt(event, event.currentTarget);
+          setRaw((current) => zoomAt(clampView(current, box, area), 2, at, box, area));
+        }}
+        className={cx(
+          "relative flex flex-1 touch-none items-center justify-center overflow-hidden bg-ground-2 select-none",
+          // No grab cursor at the fitted scale, because there is nothing to pan to.
+          view.scale > 1 && "cursor-grab active:cursor-grabbing",
+        )}
       >
         {prepared && box.width > 0 ? (
           <div
@@ -320,7 +426,7 @@ export function MapOverlay({
                         key={pin.key}
                         type="button"
                         title={`${pin.taskName} — ${pin.description}`}
-                        style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                        style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
                         className={cx(
                           "pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border transition-transform hover:scale-150",
                           pin.kind === "zone"
@@ -344,7 +450,7 @@ export function MapOverlay({
                   return (
                     <span
                       key={shot.name}
-                      style={{ left: `${u * 100}%`, top: `${v * 100}%` }}
+                      style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
                       className="absolute size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-rust/50"
                     />
                   );
@@ -362,6 +468,7 @@ export function MapOverlay({
                     style={{
                       left: `${u * 100}%`,
                       top: `${v * 100}%`,
+                      scale: 1 / view.scale,
                       rotate: shot.yaw === null ? undefined : `${shot.yaw + extra}deg`,
                     }}
                     className="absolute -translate-x-1/2 -translate-y-1/2 text-[16px] leading-none text-rust"
