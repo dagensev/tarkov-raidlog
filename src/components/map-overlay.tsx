@@ -193,6 +193,12 @@ export function MapOverlay({
     const move = (event: PointerEvent) => {
       const active = drag.current;
       if (!active || active.id !== event.pointerId) return;
+      // Pointer capture is deliberately not held (see above), so a pointerup dropped by a
+      // focus change never arrives — treat no button being held as the gesture having ended.
+      if (event.buttons === 0) {
+        drag.current = null;
+        return;
+      }
       const dx = event.clientX - active.x;
       const dy = event.clientY - active.y;
       // A few pixels of slop, so a click on a pin with a shaky hand is still a click.
@@ -421,19 +427,34 @@ export function MapOverlay({
                 ? pins.map((pin) => {
                     const { u, v } = project(calibration, pin.position);
                     if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                    // The counter-scale and the hover grow cannot live on the same element.
+                    // Both compile to the `scale` CSS property, so an inline `scale` here
+                    // would beat the button's `:hover` rule outright — a stylesheet rule
+                    // that is not `!important` never wins over an inline declaration — and
+                    // `hover:scale-150` would be dead at every zoom, fitted view included.
+                    // Worse, `transition-transform` is Tailwind's shorthand for
+                    // `transition-property: transform, translate, scale, rotate`, so with
+                    // both classes on one element the counter-scale itself would ease over
+                    // 150ms on every wheel event and never settle during a continuous zoom.
+                    // A wrapper carries the position and the counter-scale; the button
+                    // inside keeps its own size, transition and hover grow untouched.
                     return (
-                      <button
+                      <div
                         key={pin.key}
-                        type="button"
-                        title={`${pin.taskName} — ${pin.description}`}
+                        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
                         style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
-                        className={cx(
-                          "pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full border transition-transform hover:scale-150",
-                          pin.kind === "zone"
-                            ? "size-[10px] border-amber bg-amber/60"
-                            : "size-[7px] border-bone-dim bg-bone-dim/40",
-                        )}
-                      />
+                      >
+                        <button
+                          type="button"
+                          title={`${pin.taskName} — ${pin.description}`}
+                          className={cx(
+                            "pointer-events-auto block cursor-pointer rounded-full border transition-transform hover:scale-150",
+                            pin.kind === "zone"
+                              ? "size-[10px] border-amber bg-amber/60"
+                              : "size-[7px] border-bone-dim bg-bone-dim/40",
+                          )}
+                        />
+                      </div>
                     );
                   })
                 : null}
