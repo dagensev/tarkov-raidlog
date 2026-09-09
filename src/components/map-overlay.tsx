@@ -183,7 +183,12 @@ export function MapOverlay({
 
   /** A drag in flight. `moved` stays false until the pointer clears the slop below. */
   const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
-  /** Whether the gesture that just ended was a drag. Read by pin clicks in Task 4. */
+  /**
+   * Whether the gesture that just ended was a drag. Two readers: a pin's own click handler
+   * uses it to ignore the click a drag release leaves on it, and the stage's click handler
+   * uses it to skip clearing the selection when a drag happens to end over the stage rather
+   * than a pin.
+   */
   const dragged = useRef(false);
 
   // Deliberately *not* pointer capture. Capturing on the stage would retarget the click
@@ -548,19 +553,25 @@ export function MapOverlay({
           <div className="absolute bottom-4 left-4 max-w-[min(360px,calc(100%-2rem))] border border-line-bright bg-panel/95 p-3">
             <p className="stencil text-[11px] text-amber">{shown.taskName}</p>
             <p className="mt-1.5 text-[12px] leading-relaxed text-bone-dim">{shown.description}</p>
-            {hoveredKey === null ? (
-              // Only on a pin you clicked. A hover card vanishes the moment you move toward
-              // it, so offering a link on one would be offering something unreachable.
+            {shown.key === selectedKey ? (
+              // Only when the card is showing the pin you clicked, not merely one you are
+              // hovering. Testing `hoveredKey === null` instead would hide the link right
+              // after the click that should reveal it: the mouse (or, for a keyboard
+              // activation, focus) is still on the clicked pin, so `hoveredKey` is still
+              // set even though the card is showing the selection.
               <button
                 type="button"
                 onClick={() => {
                   const id = `task-${shown.taskId}`;
                   onClose();
-                  // After the overlay unmounts, so the scroll lock is off and the row is
-                  // somewhere a smooth scroll can actually take you.
-                  requestAnimationFrame(() => {
+                  // A zero timeout, not a frame: this only needs to run after React commits
+                  // the close, so the scroll lock is off and the row is somewhere a smooth
+                  // scroll can actually take you. A `requestAnimationFrame` callback is the
+                  // one timer a page that is not currently being painted can starve, and a
+                  // macrotask still runs after the commit either way.
+                  setTimeout(() => {
                     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  });
+                  }, 0);
                 }}
                 className="stencil mt-2.5 cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber"
               >
