@@ -106,13 +106,12 @@ export function MapOverlay({
   const areaRef = useRef<HTMLDivElement | null>(null);
   const [area, setArea] = useState<Size>({ width: 0, height: 0 });
 
-  // Measured when the node attaches rather than waiting for the observer's first
-  // callback, because that callback is not guaranteed to arrive. Reopening the map mounts
-  // an element that already has its final size, so there is no size *change* to report:
-  // a fresh ResizeObserver on that element recorded nothing in 300 ms, and the overlay
-  // sat on "loading" for ever.
+  // The size is measured when the node attaches, and the observer only keeps it current
+  // afterwards. Making the map's existence depend on a callback arriving is a bad trade
+  // when measuring directly costs one line. An observer that delivered nothing was in fact
+  // observed during development, and the overlay sat on "loading" for ever as a result.
   //
-  // A ref callback rather than an effect on both counts: it runs when the node actually
+  // A ref callback rather than an effect, on two counts: it runs when the node actually
   // attaches, and setting state here is not the synchronous setState in an effect body
   // that `react-hooks/set-state-in-effect` forbids.
   const attachArea = useCallback((node: HTMLDivElement | null) => {
