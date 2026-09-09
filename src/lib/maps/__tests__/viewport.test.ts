@@ -151,10 +151,12 @@ describe("wheelFactor", () => {
 
   it("treats a page as materially more than the same number in pixels", () => {
     // "materially larger": how far each factor sits from 1 (the no-op factor), not the
-    // factor itself — both are on the zoom-in side, so a raw comparison would not show it.
+    // factor itself — both are on the zoom-out side because the delta is positive.
     const page = Math.abs(wheelFactor(1, 2) - 1);
     const pixel = Math.abs(wheelFactor(1, 0) - 1);
     expect(page).toBeGreaterThan(pixel * 10);
+    // One page must equal the pixels-per-page constant's worth of pixels (mirrors module value of 800).
+    expect(wheelFactor(1, 2)).toBeCloseTo(wheelFactor(800, 0), 12);
   });
 
   it("composes a delta and its negation back to a factor of 1", () => {

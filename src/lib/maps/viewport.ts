@@ -95,7 +95,7 @@ export function zoomAt(
   );
 }
 
-/** Firefox's own value for `DOM_DELTA_LINE`: a "line" of wheel scroll is sixteen CSS pixels. */
+/** Conventional approximation to normalize line-based wheel deltas; browsers do not report a fixed pixels-per-line value. */
 const PIXELS_PER_LINE = 16;
 
 /**
