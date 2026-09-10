@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
@@ -111,10 +112,27 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="mx-auto flex min-h-screen max-w-[1400px] flex-col px-4 sm:px-6">
       <header className="rise border-b border-line pt-6 pb-0">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <Link href="/" className="group flex items-baseline gap-3">
-            <span className="stencil text-xl leading-none text-amber glow-amber">RAIDLOG</span>
-            <span className="data hidden text-[10px] text-muted transition-colors group-hover:text-bone-dim sm:inline">
-              escape from tarkov · field terminal
+          <Link href="/" className="group flex items-center gap-3">
+            {/*
+             * Decorative: the wordmark sits right beside it, so naming the badge would
+             * only say "RAIDLOG" twice to a screen reader. Eager because it is the one
+             * image above the fold on every route, and a logo that fades in late reads
+             * as a broken page rather than a loading one.
+             */}
+            <Image
+              src="/raidlog-badge.png"
+              alt=""
+              aria-hidden
+              width={192}
+              height={192}
+              loading="eager"
+              className="h-12 w-12 shrink-0"
+            />
+            <span className="flex items-baseline gap-3">
+              <span className="stencil text-xl leading-none text-amber glow-amber">RAIDLOG</span>
+              <span className="data hidden text-[10px] text-muted transition-colors group-hover:text-bone-dim sm:inline">
+                escape from tarkov · field terminal
+              </span>
             </span>
           </Link>
           <StatusStrip />
