@@ -55,7 +55,7 @@ function states(entries: Record<string, TaskStatus>): Map<string, TaskState> {
   return new Map(
     Object.entries(entries).map(([taskId, status]) => [
       taskId,
-      { taskId, status, at: 0, origin: "log" as const },
+      { taskId, status, at: 0 },
     ]),
   );
 }

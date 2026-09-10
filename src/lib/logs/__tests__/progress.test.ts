@@ -29,7 +29,7 @@ describe("deriveTaskStates", () => {
       task(TASK_A, "started", 1_000),
       task(TASK_A, "finished", 2_000),
     ]);
-    expect(states.get(TASK_A)).toMatchObject({ status: "finished", at: 2_000, origin: "log" });
+    expect(states.get(TASK_A)).toMatchObject({ status: "finished", at: 2_000 });
   });
 
   it("resolves a failed-then-restarted task to started", () => {
@@ -57,19 +57,10 @@ describe("deriveTaskStates", () => {
     expect([...states.keys()]).toEqual([TASK_B]);
   });
 
-  it("lets a manual override beat the logs", () => {
-    // How progress from before the logs on disk gets recorded.
-    const states = deriveTaskStates([task(TASK_A, "started", 1_000)], {
-      manual: { [TASK_A]: "finished", [TASK_B]: "finished" },
-    });
-    expect(states.get(TASK_A)).toMatchObject({ status: "finished", origin: "manual" });
-    expect(states.get(TASK_B)).toMatchObject({ status: "finished", origin: "manual" });
-  });
-
-  it("keeps trader and timestamp from the log when overriding", () => {
-    const event = task(TASK_A, "started", 1_000) as TaskEvent;
+  it("carries the trader and timestamp off the event", () => {
+    const event = task(TASK_A, "finished", 1_000) as TaskEvent;
     event.traderId = "54cb57776803fa99248b456e";
-    const states = deriveTaskStates([event], { manual: { [TASK_A]: "finished" } });
+    const states = deriveTaskStates([event]);
     expect(states.get(TASK_A)).toMatchObject({
       at: 1_000,
       traderId: "54cb57776803fa99248b456e",
@@ -85,16 +76,16 @@ describe("deriveTaskStates", () => {
 });
 
 describe("summarize", () => {
-  it("counts states by status and flags manual entries", () => {
-    const states = deriveTaskStates(
-      [task(TASK_A, "finished", 1_000), task(TASK_B, "started", 1_000)],
-      { manual: { zzz: "failed" } },
-    );
+  it("counts states by status", () => {
+    const states = deriveTaskStates([
+      task(TASK_A, "finished", 1_000),
+      task(TASK_B, "started", 1_000),
+      task("zzz", "failed", 1_000),
+    ]);
     expect(summarize(states)).toEqual({
       finished: 1,
       started: 1,
       failed: 1,
-      manual: 1,
       unmatched: 0,
     });
     expect(taskIdsWithStatus(states, "finished")).toEqual([TASK_A]);

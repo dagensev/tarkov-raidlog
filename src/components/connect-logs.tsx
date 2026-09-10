@@ -42,7 +42,8 @@ export function ConnectLogs() {
             <span className="text-bone">Edge</span> but not in Firefox or Safari.
           </p>
           <p className="text-[13px] leading-relaxed text-muted">
-            Everything else still works — you can track tasks by hand.
+            Without your logs there is no task progress to show, so open Raidlog in Chrome or
+            Edge to use it.
           </p>
         </div>
       </Panel>

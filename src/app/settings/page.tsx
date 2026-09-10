@@ -87,7 +87,6 @@ function LogPanel() {
     const status = useAppStore((s) => s.logStatus);
     const rescan = useAppStore((s) => s.rescan);
     const events = useAppStore((s) => s.events);
-    const manualCount = Object.keys(useAppStore((s) => s.manualTasks)).length;
 
     if (status !== 'watching') return <ConnectLogs />;
 
@@ -100,13 +99,9 @@ function LogPanel() {
                         <Label>Events read</Label>
                         <span className='data text-lg text-bone'>{events.length.toLocaleString()}</span>
                     </div>
-                    <div className='flex flex-col gap-1'>
-                        <Label>Set by hand</Label>
-                        <span className='data text-lg text-bone'>{manualCount}</span>
-                    </div>
                 </div>
                 <Button onClick={() => void rescan()}>Re-read all logs</Button>
-                <p className='text-[12px] leading-relaxed text-muted'>Re-reading starts from scratch. Anything you ticked off by hand is kept.</p>
+                <p className='text-[12px] leading-relaxed text-muted'>Re-reading starts from scratch and rebuilds your progress from the logs.</p>
             </div>
         </Panel>
     );

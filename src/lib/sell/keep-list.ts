@@ -105,7 +105,7 @@ export interface KeepOptions {
 export interface KeepInputs {
   /** Denormalized, as `useTasks()` returns them. */
   tasks: readonly Task[];
-  /** Log-derived plus manual overrides, as `useTaskStates()` returns it. */
+  /** Task states derived from the logs, as `useTaskStates()` returns it. */
   taskStates: ReadonlyMap<string, TaskState>;
   economy: EconomyBundle;
   /** Absent station means "not told". An explicit 0 means "not built". */

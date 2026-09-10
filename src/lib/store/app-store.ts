@@ -9,7 +9,6 @@ import {
   pickLogDirectory,
   requestPermission,
 } from "@/lib/logs/fs-access-source";
-import type { TaskStatus } from "@/lib/logs/progress";
 import { type ScreenshotPosition, trailFrom } from "@/lib/logs/screenshots";
 import {
   FileSystemAccessScreenshotSource,
@@ -80,7 +79,6 @@ interface AppState {
 
   events: LogEvent[];
   wipes: WipeAnalysis | null;
-  manualTasks: Record<string, TaskStatus>;
   settings: Settings;
 
   /** Trimmed API documents. Denormalized on demand by the hooks. */
@@ -132,7 +130,6 @@ interface AppState {
   reconnectScreenshots: () => Promise<void>;
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
-  setManualTask: (taskId: string, status: TaskStatus | null) => Promise<void>;
   setHideoutLevel: (stationId: string, level: number | null) => Promise<void>;
   setMapFilter: (filter: MapFilter) => void;
   setTaskView: (patch: Partial<TaskView>) => void;
@@ -226,7 +223,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   events: [],
   wipes: null,
-  manualTasks: {},
   settings: DEFAULT_SETTINGS,
 
   bundle: null,
@@ -248,10 +244,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   sellView: DEFAULT_SELL_VIEW,
 
   async hydrate() {
-    const [settings, manualTasks, events, bundle, itemIndex, economy, sellIndex] =
+    const [settings, events, bundle, itemIndex, economy, sellIndex] =
       await Promise.all([
         db.loadSettings(),
-        db.get("manualTasks"),
         db.get("events"),
         db.get("tarkovBundle"),
         db.get("itemIndex"),
@@ -261,7 +256,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       settings,
-      manualTasks: manualTasks ?? {},
       events: events ?? [],
       bundle: bundle ?? null,
       itemIndex: itemIndex ?? null,
@@ -389,14 +383,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.bundle && catalogueBehind(state, mode)) void loadCatalogue(state.bundle, set);
   },
 
-  async setManualTask(taskId, status) {
-    const manualTasks = { ...get().manualTasks };
-    if (status === null) delete manualTasks[taskId];
-    else manualTasks[taskId] = status;
-    set({ manualTasks });
-    await db.set("manualTasks", manualTasks);
-  },
-
   /**
    * Record one station's built level.
    *
@@ -404,8 +390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
    * record has to be read at click time. Building the new map in the component reads the
    * value React rendered with, and two clicks inside one frame then both start from the
    * same map — the second silently dropping the first. Filling in all 26 stations at
-   * speed lost one almost every time. `setManualTask` reads through `get()` for the same
-   * reason.
+   * speed lost one almost every time.
    */
   async setHideoutLevel(stationId, level) {
     const settings = {

@@ -1,12 +1,9 @@
 "use client";
 
-import { useState } from "react";
-
 import type { TaskAvailability } from "@/lib/graph/availability";
 import type { TaskState } from "@/lib/logs/progress";
 import { objectiveAmount } from "@/lib/tarkovdev/objectives";
 import type { Task, TaskObjective } from "@/lib/tarkovdev/types";
-import { useAppStore } from "@/lib/store/app-store";
 import { useSquadHolders } from "@/lib/store/squad-hooks";
 import { ItemIcon } from "./item-icon";
 import { Pill, cx } from "./ui";
@@ -128,13 +125,9 @@ export function TaskRow({
   /** Anchor, so a pin on the map can scroll to this row. */
   id?: string;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const setManualTask = useAppStore((s) => s.setManualTask);
-
   const status = rowStatus(state);
   const style = STATUS_STYLE[status];
   const isDone = status === "finished";
-  const fromLogs = isDone && state?.origin === "log";
 
   const objectives = mapId
     ? task.objectives.filter((o) => o.maps.some((m) => m.id === mapId))
@@ -187,7 +180,6 @@ export function TaskRow({
           {task.factionName && task.factionName !== "Any" ? (
             <Pill tone="steel">{task.factionName} only</Pill>
           ) : null}
-          {state?.origin === "manual" ? <Pill tone="muted">by hand</Pill> : null}
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
@@ -217,57 +209,15 @@ export function TaskRow({
       <div className="flex shrink-0 items-center gap-2 py-2.5 pr-3">
         <Pill tone={style.tone}>{style.label}</Pill>
 
-        {/*
-          Marking a task done by hand is the one place the app takes your word over the
-          logs, so it asks first. Clearing an override is an undo and does not.
-        */}
-        {fromLogs ? (
+        {/* Completion comes from the logs alone — there is nothing here to click. */}
+        {isDone ? (
           <span
             title="Completed in your logs"
             className="grid size-6 place-items-center border border-moss/40 bg-moss/10 text-[11px] text-moss"
           >
             ✓
           </span>
-        ) : confirming ? (
-          <span className="flex items-center gap-1">
-            <span className="data text-[10px] text-amber">Mark done?</span>
-            <button
-              type="button"
-              title="Yes, mark it done"
-              onClick={() => {
-                void setManualTask(task.id, "finished");
-                setConfirming(false);
-              }}
-              className="grid size-6 cursor-pointer place-items-center border border-moss bg-moss/20 text-[11px] text-moss"
-            >
-              ✓
-            </button>
-            <button
-              type="button"
-              title="Cancel"
-              onClick={() => setConfirming(false)}
-              className="grid size-6 cursor-pointer place-items-center border border-line-bright text-[11px] text-muted hover:text-bone"
-            >
-              ✕
-            </button>
-          </span>
-        ) : isDone ? (
-          <button
-            type="button"
-            title="You marked this done by hand — click to undo"
-            onClick={() => void setManualTask(task.id, null)}
-            className="grid size-6 cursor-pointer place-items-center border border-moss/60 bg-moss/15 text-[11px] text-moss hover:border-rust/60 hover:text-rust"
-          >
-            ✓
-          </button>
-        ) : (
-          <button
-            type="button"
-            title="Mark as done by hand"
-            onClick={() => setConfirming(true)}
-            className="grid size-6 cursor-pointer place-items-center border border-line-bright text-[11px] text-muted transition-colors hover:border-moss hover:text-moss"
-          />
-        )}
+        ) : null}
       </div>
     </li>
   );

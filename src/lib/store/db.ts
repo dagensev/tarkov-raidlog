@@ -1,7 +1,6 @@
 import { openDB, type IDBPDatabase } from "idb";
 
 import type { LogEvent } from "@/lib/logs/events";
-import type { TaskStatus } from "@/lib/logs/progress";
 import type { CoreBundle, ItemIndex, SellIndex } from "@/lib/tarkovdev/client";
 import type { EconomyBundle } from "@/lib/tarkovdev/economy";
 import type { GameMode } from "@/lib/tarkovdev/endpoints";
@@ -70,7 +69,6 @@ interface StoredValues {
   screenshotDirectory: FileSystemDirectoryHandle;
   events: LogEvent[];
   settings: Settings;
-  manualTasks: Record<string, TaskStatus>;
   /** Trimmed API documents, keyed by nothing — one bundle per game mode at a time. */
   tarkovBundle: CoreBundle;
   /** Names for the handful of items tasks reference. Loaded after the core bundle. */

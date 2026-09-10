@@ -39,7 +39,7 @@ export function SquadSync() {
     for (const [taskId, status] of Object.entries(full)) {
       if (published.current[taskId] !== status) changed[taskId] = status;
     }
-    // A task that dropped out entirely — a manual tick undone, or a wipe switch — has to
+    // A task that dropped out entirely — a wipe switch, say — has to
     // be sent too, or squadmates keep showing it as done.
     for (const taskId of Object.keys(published.current)) {
       if (!(taskId in full)) changed[taskId] = undefined as unknown as MemberProgress[string];

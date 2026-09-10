@@ -87,16 +87,14 @@ export function useSelectedWipe(): ProfileGeneration | undefined {
 
 export function useTaskStates(): Map<string, TaskState> {
   const events = useAppStore((s) => s.events);
-  const manual = useAppStore((s) => s.manualTasks);
   const wipe = useSelectedWipe();
 
   return useMemo(
     () =>
       deriveTaskStates(events, {
         folders: wipe ? new Set(wipe.folders) : undefined,
-        manual,
       }),
-    [events, manual, wipe],
+    [events, wipe],
   );
 }
 
@@ -172,12 +170,11 @@ export function useProgressCounts() {
 
   return useMemo(() => {
     const known = new Set(tasks.map((task) => task.id));
-    const { finished, started, failed, manual, unmatched } = summarize(states, known);
+    const { finished, started, failed, unmatched } = summarize(states, known);
     return {
       finished,
       started,
       failed,
-      manual,
       unmatched,
       // Everything the logs have never mentioned. Counted by subtraction rather than by
       // asking whether a task is "available", which is not reliably knowable.

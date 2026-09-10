@@ -29,7 +29,7 @@ function states(entries: Record<string, TaskState["status"]>): Map<string, TaskS
   return new Map(
     Object.entries(entries).map(([taskId, status]) => [
       taskId,
-      { taskId, status, at: 1_000, origin: "log" as const },
+      { taskId, status, at: 1_000 },
     ]),
   );
 }
@@ -122,18 +122,6 @@ describe("evaluateTask", () => {
     // You already have it; telling you it is locked would be nonsense.
     const subject = task("b", { taskRequirements: [req("a", ["complete"])] });
     expect(evaluateTask(subject, states({ b: "started" }), player).status).toBe("started");
-  });
-
-  it("lets a manual override count as a completed prerequisite", () => {
-    const manual = new Map<string, TaskState>([
-      ["a", { taskId: "a", status: "finished", at: 0, origin: "manual" }],
-    ]);
-    const result = evaluateTask(
-      task("b", { taskRequirements: [req("a", ["complete"])] }),
-      manual,
-      player,
-    );
-    expect(result.status).toBe("available");
   });
 
   it("collects every reason a task is locked, not just the first", () => {
