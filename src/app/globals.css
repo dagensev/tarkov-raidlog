@@ -30,8 +30,25 @@
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
 
+/*
+ * The whole interface is drawn a quarter larger than it is laid out.
+ *
+ * Every size here is a small one — 10 and 11px type, hairline rules — picked for density
+ * on a second monitor, and at native scale that lands too small to read from a normal
+ * desk distance. Zooming the root is what the browser's own zoom control does, so type,
+ * rules and spacing all grow together and every ratio the design already has survives.
+ * The alternative, rescaling ~160 px literals by hand, drifts apart the first time one of
+ * them is edited.
+ *
+ * The cost is that the DOM now has two pixel frames. Layout px is what CSS lengths and
+ * `offsetHeight` speak; visual px is what `getBoundingClientRect()`, `clientX/Y` and
+ * `window.innerHeight` speak, and it is this many times larger. Anything that measures
+ * the page and feeds the number back into a CSS length has to divide — see `uiScale()` in
+ * `src/lib/ui-scale.ts`, which reads this declaration rather than repeating the number.
+ */
 html {
   color-scheme: dark;
+  zoom: 1.25;
 }
 
 body {

@@ -17,6 +17,7 @@ import {
   type View,
 } from "@/lib/maps/viewport";
 import type { GameMap } from "@/lib/tarkovdev/types";
+import { uiScale } from "@/lib/ui-scale";
 import { cx } from "./ui";
 
 /**
@@ -82,12 +83,18 @@ function prepare(
   return { svg: svg as SVGSVGElement, aspect: width / height };
 }
 
-/** A cursor in the frame the transform uses: CSS pixels from the open area's centre. */
+/**
+ * A cursor in the frame the transform uses: laid-out pixels from the open area's centre.
+ *
+ * The pointer and the rect both arrive in drawn pixels, so the offset between them is
+ * right but a quarter too large for a `translate()` that is read in laid-out ones.
+ */
 function pointerAt(event: { clientX: number; clientY: number }, node: HTMLElement): Point {
   const rect = node.getBoundingClientRect();
+  const scale = uiScale();
   return {
-    x: event.clientX - (rect.left + rect.width / 2),
-    y: event.clientY - (rect.top + rect.height / 2),
+    x: (event.clientX - (rect.left + rect.width / 2)) / scale,
+    y: (event.clientY - (rect.top + rect.height / 2)) / scale,
   };
 }
 
@@ -136,7 +143,13 @@ export function MapOverlay({
     areaRef.current = node;
     if (!node) return;
     const measure = () => {
-      const { width, height } = node.getBoundingClientRect();
+      // Divided into laid-out pixels, because `box` is derived from this and then written
+      // straight back out as the stage's `width`/`height`. Measured drawn, the stage would
+      // be built a quarter larger than the hole it has to fit in.
+      const scale = uiScale();
+      const rect = node.getBoundingClientRect();
+      const width = rect.width / scale;
+      const height = rect.height / scale;
       // ResizeObserver.observe() always delivers one initial callback on top of the measure()
       // call just below, so without this, every open measures the unchanged size twice and
       // re-renders (and swaps both effects' listeners) for nothing.
@@ -207,8 +220,11 @@ export function MapOverlay({
         drag.current = null;
         return;
       }
-      const dx = event.clientX - active.x;
-      const dy = event.clientY - active.y;
+      // The travel is in drawn pixels; `view` is in laid-out ones. Undivided, the map
+      // would slide a quarter further than the hand that moved it.
+      const scale = uiScale();
+      const dx = (event.clientX - active.x) / scale;
+      const dy = (event.clientY - active.y) / scale;
       // A few pixels of slop, so a click on a pin with a shaky hand is still a click.
       if (!active.moved && Math.hypot(dx, dy) < 4) return;
       active.moved = true;

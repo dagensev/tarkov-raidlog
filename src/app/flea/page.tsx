@@ -14,6 +14,7 @@ import { useAppStore } from '@/lib/store/app-store';
 import { BUNDLE_TTL_MS } from '@/lib/store/db';
 import { useEconomy, useSellIndex, useSellRows } from '@/lib/store/hooks';
 import { itemIconLink, itemPageLink } from '@/lib/tarkovdev/client';
+import { uiScale } from '@/lib/ui-scale';
 
 /**
  * The height of one collapsed row, in pixels: `CELL` plus its padding plus the rule under
@@ -526,9 +527,14 @@ export default function FleaPage() {
     // rows it labels.
     useEffect(() => {
         const read = () => {
+            // Both of these come back in drawn pixels, and everything they are compared
+            // against — `ROW_HEIGHT`, the measured open row, the spacer heights written
+            // back out below — is in laid-out ones. Without the divide the window is a
+            // quarter too tall and lands a quarter too far down the list.
+            const scale = uiScale();
             const element = body.current;
-            setScrolled(element ? -element.getBoundingClientRect().top : 0);
-            setViewportHeight(window.innerHeight);
+            setScrolled(element ? -element.getBoundingClientRect().top / scale : 0);
+            setViewportHeight(window.innerHeight / scale);
         };
         read();
         window.addEventListener('scroll', read, { passive: true });
