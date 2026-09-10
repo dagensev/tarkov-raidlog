@@ -8,8 +8,16 @@
 
 import type { SellIndex, SellItem } from "@/lib/tarkovdev/client";
 
-/** Lower is better. Exact beats prefix beats substring, so "gas" finds the analyzer. */
-function rank(item: SellItem, query: string): number {
+/**
+ * Lower is better, and -1 is no match. Exact beats prefix beats substring, so "gas" finds
+ * the analyzer.
+ *
+ * Exported because the flea tab filters on it directly: there the query narrows a table
+ * that is already on screen rather than producing a list of its own, so it needs the
+ * predicate without the ranking, the sorting or the cap that `searchItems` wraps it in.
+ * `query` must already be trimmed and lowercased.
+ */
+export function rank(item: SellItem, query: string): number {
   const name = item.name.toLowerCase();
   const short = (item.shortName ?? "").toLowerCase();
   const normalized = item.normalizedName.toLowerCase();
@@ -24,8 +32,9 @@ function rank(item: SellItem, query: string): number {
 /**
  * Items matching `query`, best match first.
  *
- * An empty query returns nothing rather than everything. The page shows the keep list in
- * that case, which is a different and much shorter list than all 4835 items.
+ * An empty query returns nothing rather than everything, and the cap keeps the answer to a
+ * readable length. Both suit a lookup — "find me this item" — rather than the flea tab's
+ * table, which filters on `rank` and orders itself.
  */
 export function searchItems(index: SellIndex, query: string, limit = 60): SellItem[] {
   const needle = query.trim().toLowerCase();

@@ -172,7 +172,13 @@ export interface RawTradersData {
   traders: Record<string, RawTrader>;
 }
 
-/** What a trader pays, in that trader's own currency and converted to roubles. */
+/**
+ * One side of a trader's counter, in that trader's own currency and in roubles.
+ *
+ * The same shape carries both directions. `sellToTrader` fills in only the first five
+ * fields — a trader buys your loot whatever your standing — while `buyFromTrader` also
+ * carries what gates the offer.
+ */
 export interface RawTraderOffer {
   /** Trader id. */
   trader: string;
@@ -182,6 +188,13 @@ export interface RawTraderOffer {
   priceRUB: number;
   currency: string;
   currencyItem: string;
+  /** Buy offers only: the loyalty level that unlocks it. */
+  minTraderLevel?: number | null;
+  /** Buy offers only: task id that unlocks it. 66 of 2399 buyable items have one. */
+  taskUnlock?: string | null;
+  /** Buy offers only: how many the trader will part with per restock. */
+  buyLimit?: number | null;
+  restockAmount?: number | null;
 }
 
 export interface RawItem {
@@ -209,10 +222,46 @@ export interface RawItem {
   lastLowPrice?: number | null;
   stackMaxSize?: number | null;
   sellToTrader?: RawTraderOffer[];
+  /** What traders will sell it to you for. Empty for the 2436 items none of them stock. */
+  buyFromTrader?: RawTraderOffer[];
+  /** Item category ids, the whole ancestry from the leaf up to `item`. */
+  categories?: string[];
+  /** Handbook category ids: the leaf the item sits in, then that leaf's root. */
+  handbookCategories?: string[];
+}
+
+/**
+ * A node of either category tree.
+ *
+ * The two differ in one way that matters: an item category's `name` is a translation key
+ * of the usual `<id> Name` shape, while a handbook category's `name` is its own bare id.
+ * Both are keys into the dictionary, so resolving them the same way works.
+ */
+export interface RawCategory {
+  id: string;
+  /** Translation key. */
+  name: string;
+  normalizedName: string;
+  /** Parent id. Item categories write "" at a root, handbook categories write null. */
+  parent?: string | null;
+  children?: string[];
+}
+
+/** The flea market itself. The only reason to read it is the pair of fee rates. */
+export interface RawFleaMarket {
+  name: string;
+  normalizedName: string;
+  minPlayerLevel: number;
+  enabled: boolean;
+  sellOfferFeeRate: number;
+  sellRequirementFeeRate: number;
 }
 
 export interface RawItemsData {
   items: Record<string, RawItem>;
+  itemCategories?: Record<string, RawCategory>;
+  handbookCategories?: Record<string, RawCategory>;
+  fleaMarket?: RawFleaMarket;
   playerLevels?: Array<{ level: number; exp: number }>;
 }
 

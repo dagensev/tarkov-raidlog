@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import { CATEGORY_CHIPS, matchesChip } from "@/lib/sell/filters";
 import { buildKeepList } from "@/lib/sell/keep-list";
 
-import { denormalize, loadCoreBundle, referencedItemIds, type CoreBundle } from "../client";
+import {
+  denormalize,
+  loadCoreBundle,
+  loadItemCatalogue,
+  referencedItemIds,
+  type CoreBundle,
+  type SellIndex,
+} from "../client";
 import {
   CURRENCY_ITEM_IDS,
   economyItemIds,
@@ -246,5 +254,100 @@ describe.skipIf(!economy || !bundle)("live economy documents", () => {
     });
     expect(keep.size).toBeGreaterThan(800);
     expect(keep.size).toBeLessThan(1400);
+  });
+});
+
+/**
+ * The item catalogue, probed separately again — it is the 16.7 MB document, and it is the
+ * one the flea tab is built out of.
+ */
+async function probeCatalogue(): Promise<SellIndex | null> {
+  if (skip) return null;
+  try {
+    const { sell } = await loadItemCatalogue("pvp-season", [], { attempts: 1, backoffMs: 0 });
+    return sell;
+  } catch {
+    return null;
+  }
+}
+
+const catalogue = await probeCatalogue();
+
+describe.skipIf(!catalogue)("live item catalogue", () => {
+  const items = () => Object.values(catalogue!.items);
+
+  it("returns the whole catalogue with presets dropped", () => {
+    // Measured at 4835 of the 5320 the document holds.
+    expect(items().length).toBeGreaterThan(4000);
+    expect(items().filter((item) => item.types.includes("preset"))).toEqual([]);
+  });
+
+  it("carries a buy offer for the items traders stock", () => {
+    // Measured at 2399. The column is blank for everything else, which is correct and is
+    // why the count matters: a shape change upstream would read the same as a quiet game
+    // change, and this says which.
+    const buyable = items().filter((item) => item.buyFrom !== null);
+    expect(buyable.length).toBeGreaterThan(1800);
+    expect(buyable.every((item) => item.buyFrom!.priceRUB > 0)).toBe(true);
+  });
+
+  it("carries the loyalty level on buy offers and never on sell offers", () => {
+    // Traders buy your loot whatever your standing, so a level on that side would be a
+    // field the row is not entitled to show.
+    const gated = items().filter((item) => item.buyFrom?.minTraderLevel);
+    expect(gated.length).toBeGreaterThan(1000);
+    expect(items().filter((item) => item.bestTrader?.minTraderLevel)).toEqual([]);
+  });
+
+  it("quotes at least one trader in a currency that is not roubles", () => {
+    // Peacekeeper. Losing this would silently turn his prices into rouble conversions
+    // that do not match the number on his screen.
+    const foreign = items().filter((item) => item.buyFrom && item.buyFrom.currency !== "RUB");
+    expect(foreign.length).toBeGreaterThan(100);
+    expect(foreign[0].buyFrom!.price).not.toBe(foreign[0].buyFrom!.priceRUB);
+  });
+
+  it("carries listing fee rates that are neither missing nor zero", () => {
+    // The fallback in the client would hide a document that stopped carrying these, and
+    // the profit column would quietly go back to being the raw price difference.
+    expect(catalogue!.fleaMarket.sellOfferFeeRate).toBeGreaterThan(0);
+    expect(catalogue!.fleaMarket.sellRequirementFeeRate).toBeGreaterThan(0);
+  });
+
+  it("resolves every category chip to a non-empty set of items", () => {
+    // The chips name categories by their normalized name, so a rename upstream shows up
+    // as a chip that silently matches nothing rather than as an error.
+    const empty = CATEGORY_CHIPS.filter(
+      (chip) => !items().some((item) => matchesChip(item, chip)),
+    );
+    expect(empty.map((chip) => chip.id)).toEqual([]);
+  });
+
+  it("keeps the handbook side to roots, which is what the chips match on", () => {
+    // An item lists its leaf and its root; keeping both would make "Keys" and
+    // "Mechanical keys" two chips that mean the same thing.
+    const roots = new Set(items().flatMap((item) => item.handbook));
+    expect(roots.size).toBeLessThanOrEqual(20);
+    expect(roots).toContain("keys");
+    expect(roots).not.toContain("mechanical-keys");
+  });
+
+  it("reports what the catalogue returned", () => {
+    const withFlea = items().filter((item) => !item.noFlea && (item.avg24hPrice ?? item.lastLowPrice));
+    const counts = CATEGORY_CHIPS.map(
+      (chip) => `${chip.label} ${items().filter((item) => matchesChip(item, chip)).length}`,
+    );
+    console.log(
+      [
+        "",
+        `  items         ${items().length}`,
+        `  with a price  ${withFlea.length}`,
+        `  buyable       ${items().filter((item) => item.buyFrom).length}`,
+        `  fee rates     ${catalogue!.fleaMarket.sellOfferFeeRate} / ${catalogue!.fleaMarket.sellRequirementFeeRate}`,
+        `  chips         ${counts.join(", ")}`,
+        "",
+      ].join("\n"),
+    );
+    expect(items().length).toBeGreaterThan(0);
   });
 });

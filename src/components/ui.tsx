@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -74,7 +74,9 @@ export function Pill({
   return (
     <span
       className={cx(
-        "data inline-flex items-center gap-1.5 border px-1.5 py-[1px] text-[10px] uppercase tracking-wider",
+        // Never wraps: a badge that breaks across two lines stops reading as one label,
+        // and the letter-spacing makes even a short one wider than it looks.
+        "data inline-flex shrink-0 items-center gap-1.5 border px-1.5 py-[1px] text-[10px] whitespace-nowrap uppercase tracking-wider",
         TONE[tone],
         className,
       )}
@@ -174,4 +176,72 @@ export function Readout({
 
 export function EmptyNote({ children }: { children: ReactNode }) {
   return <p className="px-4 py-6 text-center text-[13px] text-muted">{children}</p>;
+}
+
+/**
+ * The three form surfaces, which were the same class string copy-pasted onto raw elements
+ * across the tasks, sell and squad pages until a third table needed them again.
+ *
+ * They stay thin wrappers over the native elements rather than growing an API: every
+ * caller wants a different `onChange` type, and the value of lifting them was never the
+ * props, only the border, the ground and the amber focus ring being the same everywhere.
+ */
+const FIELD =
+  "data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone placeholder:text-muted focus:border-amber-dim focus:outline-none";
+
+export function TextField({
+  className,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={cx(FIELD, className)} />;
+}
+
+export function SelectField({
+  className,
+  children,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select {...props} className={cx(FIELD, className)}>
+      {children}
+    </select>
+  );
+}
+
+/**
+ * A filter chip: a button that stays lit while its filter is on.
+ *
+ * `aria-pressed` rather than a role of its own — it is a toggle, and a screen reader that
+ * only sees the amber border learns nothing.
+ */
+export function Chip({
+  children,
+  active,
+  onClick,
+  title,
+  className,
+}: {
+  children: ReactNode;
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      aria-pressed={active}
+      className={cx(
+        "stencil cursor-pointer border px-3 py-1.5 text-[10px] transition-colors",
+        active
+          ? "border-amber bg-amber/15 text-amber"
+          : "border-line-bright text-muted hover:text-bone-dim",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }

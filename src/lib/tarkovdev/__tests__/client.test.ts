@@ -296,9 +296,22 @@ describe("loadItemCatalogue", () => {
             basePrice: 100,
             avg24hPrice: 5000,
             lastLowPrice: 4800,
+            categories: ["cat-key", "cat-item"],
+            handbookCategories: ["hb-mechanical-keys", "hb-keys"],
             sellToTrader: [
               { trader: "peacekeeper", price: 40, priceRUB: 4400, currency: "USD" },
               { trader: "therapist", price: 4600, priceRUB: 4600, currency: "RUB" },
+            ],
+            buyFromTrader: [
+              { trader: "skier", price: 9000, priceRUB: 9000, currency: "RUB", minTraderLevel: 3 },
+              {
+                trader: "peacekeeper",
+                price: 40,
+                priceRUB: 7600,
+                currency: "USD",
+                minTraderLevel: 2,
+                taskUnlock: "task9",
+              },
             ],
           },
           lamp: {
@@ -321,6 +334,20 @@ describe("loadItemCatalogue", () => {
             types: ["gun", "preset"],
           },
         },
+        itemCategories: {
+          "cat-key": { id: "cat-key", name: "cat-key Name", normalizedName: "key", parent: "cat-item" },
+          "cat-item": { id: "cat-item", name: "cat-item Name", normalizedName: "item", parent: "" },
+        },
+        handbookCategories: {
+          "hb-mechanical-keys": {
+            id: "hb-mechanical-keys",
+            name: "hb-mechanical-keys",
+            normalizedName: "mechanical-keys",
+            parent: "hb-keys",
+          },
+          "hb-keys": { id: "hb-keys", name: "hb-keys", normalizedName: "keys", parent: null },
+        },
+        fleaMarket: { sellOfferFeeRate: 0.05, sellRequirementFeeRate: 0.05 },
       },
     };
   }
@@ -374,7 +401,43 @@ describe("loadItemCatalogue", () => {
   it("picks the best trader on roubles, never on the quoted price", async () => {
     // Peacekeeper's 40 is dollars. Comparing quoted prices would pick the smaller offer.
     const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
-    expect(sell.items.key1.bestTrader).toEqual({ traderId: "therapist", priceRUB: 4600 });
+    expect(sell.items.key1.bestTrader).toMatchObject({ traderId: "therapist", priceRUB: 4600 });
+  });
+
+  it("keeps the quoted price and its currency, which is what the trader's screen shows", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.key1.buyFrom).toEqual({
+      traderId: "peacekeeper",
+      priceRUB: 7600,
+      price: 40,
+      currency: "USD",
+      minTraderLevel: 2,
+      taskUnlock: "task9",
+    });
+  });
+
+  it("picks the cheapest trader to buy from, the opposite end from the sell side", async () => {
+    // Skier's 9000 roubles beats Peacekeeper's 40 on the quoted number and loses on roubles.
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.key1.buyFrom?.priceRUB).toBe(7600);
+  });
+
+  it("reports no buy offer for an item no trader stocks", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.lamp.buyFrom).toBeNull();
+  });
+
+  it("resolves categories to names, and keeps only the root of the handbook tree", async () => {
+    // The leaf is where the item sits; the root is the only level that makes a chip.
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.key1.categories).toEqual(["key", "item"]);
+    expect(sell.items.key1.handbook).toEqual(["keys"]);
+    expect(sell.items.key1.types).toEqual(["keys"]);
+  });
+
+  it("reads the listing fee rates off the same document as the prices", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.fleaMarket).toEqual({ sellOfferFeeRate: 0.05, sellRequirementFeeRate: 0.05 });
   });
 
   it("reports no trader offer rather than a zero one", async () => {

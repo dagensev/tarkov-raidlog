@@ -7,7 +7,7 @@ import { HideoutLevels } from '@/components/hideout-levels';
 import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { isFileSystemAccessSupported } from '@/lib/logs/fs-access-source';
 import { useAppStore } from '@/lib/store/app-store';
-import { useGameMode, useSelectedWipe, useTarkovData } from '@/lib/store/hooks';
+import { useGameMode, useSelectedWipe, useSellIndex, useTarkovData } from '@/lib/store/hooks';
 import { GAME_MODES } from '@/lib/tarkovdev/endpoints';
 
 /** Capability never changes within a page load, so there is nothing to subscribe to. */
@@ -175,6 +175,10 @@ function DataPanel() {
     const data = useTarkovData();
     const error = useAppStore((s) => s.dataError);
     const loading = useAppStore((s) => s.dataLoading);
+    // The 16.7 MB item catalogue arrives well after the task list and has its own flag.
+    // One button fetches both, so it has to wait for the slower of the two.
+    const downloading = useAppStore((s) => s.catalogueLoading);
+    const prices = useSellIndex();
     const chosenMode = useAppStore((s) => s.settings.gameMode);
     const sessionMode = useAppStore((s) => s.sessionMode);
     const mode = useGameMode();
@@ -214,11 +218,26 @@ function DataPanel() {
                     </p>
                 </div>
 
-                <Button onClick={() => void refresh(true)} disabled={loading}>
-                    {loading ? 'Loading…' : 'Refresh from tarkov.dev'}
+                <div className='flex flex-col gap-1.5'>
+                    <Label>Prices and catalogue</Label>
+                    <p className='data text-[10px] text-muted'>
+                        {downloading
+                            ? 'Downloading…'
+                            : prices
+                              ? `${Object.keys(prices.items).length.toLocaleString()} items, priced ${new Date(prices.fetchedAt).toLocaleString()}`
+                              : 'Not downloaded yet.'}
+                    </p>
+                </div>
+
+                <Button onClick={() => void refresh(true)} disabled={loading || downloading}>
+                    {downloading ? 'Downloading…' : loading ? 'Loading…' : 'Refresh from tarkov.dev'}
                 </Button>
                 {error ? <p className='data text-[11px] text-rust'>{error}</p> : null}
-                <p className='text-[12px] leading-relaxed text-muted'>Cached on this machine and refreshed daily.</p>
+                <p className='text-[12px] leading-relaxed text-muted'>
+                    Cached on this machine and refreshed daily. There is no prices-only endpoint,
+                    so bringing flea prices up to date means fetching the whole 16.7 MB catalogue
+                    again.
+                </p>
             </div>
         </Panel>
     );

@@ -208,17 +208,17 @@ describe("hideoutReasons", () => {
     expect(ids(hideoutReasons([workbench], { workbench: 2 }))).toEqual(["tools"]);
   });
 
-  it("wants every level when the station is not in the record, and says it is guessing", () => {
-    const reasons = hideoutReasons([workbench], {});
-    expect(ids(reasons)).toEqual(["screws", "tools", "wires"]);
-    expect(reasons.get("screws")![0].unverified).toBe(true);
+  it("wants every level when the station is not in the record", () => {
+    // Nothing recorded means we are guessing, and the safe guess for a keep is "not built".
+    expect(ids(hideoutReasons([workbench], {}))).toEqual(["screws", "tools", "wires"]);
   });
 
-  it("treats an explicit zero as told, not as guessed", () => {
-    // "Not built" and "not told" want the same items, but only one of them is a guess.
-    const reasons = hideoutReasons([workbench], { workbench: 0 });
-    expect(ids(reasons)).toEqual(["screws", "tools", "wires"]);
-    expect(reasons.get("screws")![0].unverified).toBeUndefined();
+  it("wants the same for an explicit zero, which is the answer it was guessing", () => {
+    expect(ids(hideoutReasons([workbench], { workbench: 0 }))).toEqual([
+      "screws",
+      "tools",
+      "wires",
+    ]);
   });
 
   it("labels a reason with the station and the level that wants it", () => {
@@ -269,18 +269,14 @@ describe("barterReasons", () => {
     expect(reasons.get("wires")![0].locked).toBe(true);
   });
 
-  it("guesses rather than locks when the trader level was never recorded", () => {
-    // Nothing in the app writes trader levels yet, so this is the common case.
+  it("leaves it unlocked when the trader level was never recorded", () => {
+    // Nothing in the app writes trader levels yet, so this is the common case, and hiding
+    // a barter nobody has told us about would quietly make its inputs look sellable.
     const gated = barter({ minTraderLevel: 3 });
     const reason = barterReasons([gated], states({}), {}, names).get("wires")![0];
-    expect(reason).toMatchObject({ unverified: true });
     expect(reason.locked).toBeUndefined();
   });
 
-  it("does not call a level-one barter unverified, since every trader starts there", () => {
-    expect(barterReasons([barter()], states({}), {}, names).get("wires")![0].unverified)
-      .toBeUndefined();
-  });
 });
 
 describe("craftReasons", () => {
@@ -302,10 +298,9 @@ describe("craftReasons", () => {
     expect(ids(craftReasons([craft()], [workbench], { workbench: 2 }))).toEqual(["wires", "wrench"]);
   });
 
-  it("still wants them when the station level is unknown, and says it is guessing", () => {
+  it("still wants them when the station level is unknown", () => {
     // An empty checklist must not quietly make every craft input look sellable.
-    const reasons = craftReasons([craft()], [workbench], {});
-    expect(reasons.get("wires")![0].unverified).toBe(true);
+    expect(ids(craftReasons([craft()], [workbench], {}))).toEqual(["wires", "wrench"]);
   });
 
   it("marks a tool as returned and gives it a count of one", () => {
@@ -410,15 +405,34 @@ describe("buildKeepList", () => {
     expect(entry.softCount).toBe(8); // the barter's 3 and the craft's 5
   });
 
+  it("leaves a loose task objective out of the count, however many it asks for", () => {
+    // Minibus asks for ten found-in-raid items from the Tools category and twenty-one
+    // items satisfy it. Counted, a wrench read "hold ten" when one of anything on the
+    // list would do. It stays in the reason list, where "1 of 21 accepted" says what it is.
+    const loose = task("minibus", {
+      objectives: [
+        objective({ items: ["wrench", "pliers", "awl", "drill", "files"], count: 10, foundInRaid: true }),
+      ],
+    });
+    const entry = buildKeepList(inputs({ tasks: [loose], economy: economy({ stations: [], barters: [], crafts: [] }) })).get("wrench")!;
+    expect(entry.reasons.map((r) => r.kind)).toEqual(["task"]);
+    expect(entry.reasons[0].tier).toBe("soft");
+    expect(entry.keepCount).toBe(0);
+    expect(entry.tier).toBe("soft");
+  });
+
+  it("still counts a named hand-in, which is the case the number is for", () => {
+    const named = task("debut", { objectives: [objective({ items: ["wrench"], count: 3 })] });
+    const entry = buildKeepList(inputs({ tasks: [named], economy: economy({ stations: [], barters: [], crafts: [] }) })).get("wrench")!;
+    expect(entry.keepCount).toBe(3);
+    expect(entry.tier).toBe("hard");
+  });
+
   it("counts nothing for an item only a barter or a craft wants", () => {
     const barterOnly = economy({ stations: [], crafts: [] });
     const list = buildKeepList(inputs({ tasks: [], economy: barterOnly }));
     expect(list.get("wires")).toMatchObject({ keepCount: 0, softCount: 3 });
     expect(buildKeepList(inputs()).get("wrench")!.keepCount).toBe(0);
-  });
-
-  it("reports the entry as unverified when any reason had to guess", () => {
-    expect(buildKeepList(inputs({ hideoutLevels: {} })).get("wires")!.unverified).toBe(true);
   });
 
   it("adds up a task that wants the same item from two identical objectives", () => {

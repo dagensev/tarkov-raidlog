@@ -22,3 +22,22 @@ export function nextHideoutLevels(
 export function recordedCount(levels: Readonly<Record<string, number>>): number {
   return Object.keys(levels).length;
 }
+
+/** The station whose third level cuts the flea market's listing fee by 30%. */
+export const INTELLIGENCE_CENTER = "intelligence-center";
+
+/**
+ * The recorded Intelligence Center level, for the flea fee.
+ *
+ * Zero when the station is not in the record, which reads the fee as undiscounted. That is
+ * the pessimistic guess and the right one: overstating the fee understates a flip's
+ * profit, and a row that promises money it does not pay out is the expensive mistake.
+ */
+export function intelligenceCenterLevel(
+  levels: Readonly<Record<string, number>>,
+  stations: ReadonlyArray<{ id: string; normalizedName: string }>,
+): number {
+  const station = stations.find((each) => each.normalizedName === INTELLIGENCE_CENTER);
+  if (!station) return 0;
+  return levels[station.id] ?? 0;
+}

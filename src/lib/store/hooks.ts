@@ -6,11 +6,11 @@ import { computeAvailability, type TaskAvailability } from "@/lib/graph/availabi
 import { buildTaskGraph } from "@/lib/graph/task-graph";
 import { deriveTaskStates, summarize, type TaskState } from "@/lib/logs/progress";
 import type { ProfileGeneration } from "@/lib/logs/wipe";
+import { intelligenceCenterLevel } from "@/lib/sell/hideout-levels";
 import { buildKeepList, type KeepList } from "@/lib/sell/keep-list";
-import { searchItems } from "@/lib/sell/search";
-import { keepRows, rowsFor, type SellRow } from "@/lib/sell/verdict";
-import { denormalize, type SellIndex } from "@/lib/tarkovdev/client";
-import type { EconomyBundle } from "@/lib/tarkovdev/economy";
+import { catalogueRows, type PriceContext, type SellRow } from "@/lib/sell/verdict";
+import { DEFAULT_FLEA_RATES, denormalize, type SellIndex } from "@/lib/tarkovdev/client";
+import type { EconomyBundle, HideoutStation } from "@/lib/tarkovdev/economy";
 import { mapsWithTasks, resolveMap } from "@/lib/tarkovdev/maps";
 import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
 import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
@@ -28,6 +28,7 @@ const EMPTY_TASKS: Task[] = [];
 const EMPTY_MAPS: GameMap[] = [];
 const EMPTY_KEEP: KeepList = new Map();
 const EMPTY_ROWS: SellRow[] = [];
+const EMPTY_STATIONS: HideoutStation[] = [];
 
 /**
  * The API's normalized documents, reshaped into nested objects.
@@ -219,21 +220,49 @@ export function useKeepList(): KeepList {
 }
 
 /**
- * The rows the sell check renders.
+ * What the flea tab needs to price a row: the fee rates and the hideout that discounts them.
  *
- * With no query this is the keep list, which is the browsing view. With one it is a
- * search across the whole catalogue, which is the only way an item nothing wants can
- * reach the screen at all.
+ * Its own hook so the context object has a stable identity across renders — `useSellRows`
+ * memoizes on it, and a fresh object each render would rebuild all 4835 rows on every
+ * keystroke in the search box.
+ */
+export function usePriceContext(): PriceContext {
+  const index = useSellIndex();
+  const economy = useEconomy();
+  const traderNames = useTraderNames();
+  const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
+
+  const rates = index?.fleaMarket ?? DEFAULT_FLEA_RATES;
+  const stations = economy?.stations ?? EMPTY_STATIONS;
+
+  return useMemo(
+    () => ({
+      rates,
+      traderNames,
+      intelligenceCenter: intelligenceCenterLevel(hideoutLevels, stations),
+    }),
+    [rates, traderNames, hideoutLevels, stations],
+  );
+}
+
+/**
+ * The rows the flea tab renders: one per item in the catalogue.
+ *
+ * The sell check built these from the keep list, so the only items that ever reached the
+ * screen were ones something already wanted, and an item nobody wanted could be found only
+ * by typing its name. Every narrowing now happens in `filterRows` over the whole table
+ * instead, which is what makes the filter chips and the column sorts mean anything.
+ *
+ * Building all 4835 once per catalogue load is cheap; re-filtering them per keystroke is
+ * cheaper still, which is why the query is not a dependency here.
  */
 export function useSellRows(): SellRow[] {
   const keep = useKeepList();
   const index = useSellIndex();
-  const traderNames = useTraderNames();
-  const query = useAppStore((s) => s.sellView.query);
+  const context = usePriceContext();
 
-  return useMemo(() => {
-    if (!index) return EMPTY_ROWS;
-    if (!query.trim()) return keepRows(keep, index, traderNames);
-    return rowsFor(searchItems(index, query), keep, traderNames);
-  }, [keep, index, traderNames, query]);
+  return useMemo(
+    () => (index ? catalogueRows(index, keep, context) : EMPTY_ROWS),
+    [keep, index, context],
+  );
 }

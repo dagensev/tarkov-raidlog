@@ -60,8 +60,6 @@ export interface KeepReason {
   returned?: boolean;
   /** Real, but out of reach — a barter behind an unfinished task or above your loyalty. */
   locked?: boolean;
-  /** We had to guess, because you have not told us the station or trader level. */
-  unverified?: boolean;
 }
 
 export interface KeepEntry {
@@ -77,15 +75,19 @@ export interface KeepEntry {
   hardCount: number;
   softCount: number;
   /**
-   * How many to hold, counting only tasks and hideout upgrades.
+   * How many to hold, counting only hard reasons from tasks and hideout upgrades.
    *
    * Barters and crafts are left out because neither ever finishes: they will want the
    * item again next week, and the big barters ask for fifty of something, so counting
-   * them would drown out the things that do finish. Still an upper bound rather than a
-   * target, for the same reason `hardCount` is: nothing here knows what you already own.
+   * them would drown out the things that do finish.
+   *
+   * Loose task objectives are left out for the same reason they are already tiered soft.
+   * Minibus asks for ten found-in-raid items from the Tools category and twenty-one items
+   * satisfy it, so counting it against a wrench read as "hold eleven wrenches" when one
+   * of anything on the list would do. Still an upper bound rather than a target: nothing
+   * here knows what you already own.
    */
   keepCount: number;
-  unverified: boolean;
 }
 
 export type KeepList = ReadonlyMap<string, KeepEntry>;
@@ -237,7 +239,6 @@ export function hideoutReasons(
           foundInRaid: line.foundInRaid,
           tier: "hard",
           alternatives: 1,
-          ...(unverified ? { unverified: true } : {}),
         });
       }
     }
@@ -262,15 +263,13 @@ export function barterReasons(
 
   for (const barter of barters) {
     let locked = false;
-    let unverified = false;
 
     if (barter.taskUnlock && taskStates.get(barter.taskUnlock)?.status !== "finished") {
       locked = true;
     }
     if (barter.minTraderLevel != null && barter.minTraderLevel > 1) {
       const level = traderLevels[barter.traderId];
-      if (level === undefined) unverified = true;
-      else if (level < barter.minTraderLevel) locked = true;
+      if (level !== undefined && level < barter.minTraderLevel) locked = true;
     }
 
     const label = `${traderNames.get(barter.traderId) ?? barter.traderId} barter`;
@@ -284,7 +283,6 @@ export function barterReasons(
         tier: "soft",
         alternatives: 1,
         ...(locked ? { locked: true } : {}),
-        ...(unverified ? { unverified: true } : {}),
       });
     }
   }
@@ -296,8 +294,7 @@ export function barterReasons(
  *
  * The one place the station checklist tightens the list rather than loosening it: a
  * craft you cannot run is not a reason to hold anything. An unrecorded station still
- * counts, marked unverified, so an empty checklist never quietly makes 247 items look
- * sellable.
+ * counts, so an empty checklist never quietly makes 247 items look sellable.
  *
  * Soft, like a barter: a craft never completes either, so "keep four" would really mean
  * "keep four for the rest of the wipe".
@@ -312,8 +309,9 @@ export function craftReasons(
 
   for (const craft of crafts) {
     const recorded = hideoutLevels[craft.stationId];
-    const unverified = recorded === undefined;
-    if (!unverified && recorded < craft.level) continue;
+    // Nothing recorded means we are guessing, and the safe guess for a keep is that you
+    // can run it.
+    if (recorded !== undefined && recorded < craft.level) continue;
 
     const label = `${names.get(craft.stationId) ?? craft.stationId} craft`;
     for (const line of craft.requiredItems) {
@@ -327,7 +325,6 @@ export function craftReasons(
         tier: "soft",
         alternatives: 1,
         ...(line.tool ? { returned: true } : {}),
-        ...(unverified ? { unverified: true } : {}),
       });
     }
   }
@@ -352,7 +349,6 @@ function identity(reason: KeepReason): string {
     reason.optional ?? false,
     reason.returned ?? false,
     reason.locked ?? false,
-    reason.unverified ?? false,
   ].join("|");
 }
 
@@ -413,11 +409,8 @@ export function buildKeepList(inputs: KeepInputs): KeepList {
     let softCount = 0;
     let keepCount = 0;
     let anyReturned = false;
-    let unverified = false;
 
     for (const reason of reasons) {
-      if (reason.unverified) unverified = true;
-
       // One wrench serves every craft that asks for one, forever, so tools are added
       // once at the end rather than per reason.
       if (reason.returned) {
@@ -427,7 +420,7 @@ export function buildKeepList(inputs: KeepInputs): KeepList {
 
       if (reason.tier === "hard") hardCount += reason.count;
       else softCount += reason.count;
-      if (COUNTED_KINDS.has(reason.kind)) keepCount += reason.count;
+      if (reason.tier === "hard" && COUNTED_KINDS.has(reason.kind)) keepCount += reason.count;
     }
     // Tools only ever come from crafts, which are soft and never counted.
     if (anyReturned) softCount += 1;
@@ -440,7 +433,6 @@ export function buildKeepList(inputs: KeepInputs): KeepList {
       hardCount,
       softCount,
       keepCount,
-      unverified,
     });
   }
   return list;

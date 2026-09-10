@@ -5,6 +5,7 @@ import {
   type GameMode,
 } from "./endpoints";
 import type {
+  RawCategory,
   RawDocument,
   RawItem,
   RawItemsData,
@@ -13,6 +14,7 @@ import type {
   RawTask,
   RawTasksData,
   RawTrader,
+  RawTraderOffer,
   RawTradersData,
   TranslationDictionary,
 } from "./raw-types";
@@ -219,7 +221,26 @@ export function referencedItemIds(tasks: Record<string, RawTask>): string[] {
 
 export type ItemIndex = Record<string, ItemRef>;
 
-/** Prices and footprint for one item — everything the sell check puts on a row. */
+/** One side of a trader's counter, as a row renders it. */
+export interface TraderOffer {
+  traderId: string;
+  /** The one figure that compares across traders. */
+  priceRUB: number;
+  /**
+   * The same offer in the trader's own currency, and that currency's code.
+   *
+   * Kept because Peacekeeper quotes dollars and the game screen shows dollars: a row that
+   * printed only the rouble conversion would not match what the reader is looking at.
+   */
+  price: number;
+  currency: string;
+  /** Buy offers only: the loyalty level that unlocks it. Null on a sell offer. */
+  minTraderLevel: number | null;
+  /** Buy offers only: id of the task that unlocks it, when one does. */
+  taskUnlock: string | null;
+}
+
+/** Prices and footprint for one item — everything a row on the flea tab puts on screen. */
 export interface SellItem {
   id: string;
   name: string;
@@ -240,8 +261,22 @@ export interface SellItem {
   avg24hPrice: number | null;
   lastLowPrice: number | null;
   basePrice: number | null;
-  /** The best offer across traders, chosen on roubles. */
-  bestTrader: { traderId: string; priceRUB: number } | null;
+  /** The best price a trader pays, chosen on roubles. */
+  bestTrader: TraderOffer | null;
+  /**
+   * The cheapest a trader sells it for, chosen on roubles, whatever loyalty level that
+   * offer needs. Null for the 2436 items no trader stocks.
+   */
+  buyFrom: TraderOffer | null;
+  /** tarkov.dev's own tags, e.g. `barter`, `keys`, `noFlea`. Presets never reach here. */
+  types: string[];
+  /**
+   * Item category ancestry as normalized names, e.g. `silencer` up through `weapon-mod`.
+   * Names rather than ids so the filter chips read as themselves.
+   */
+  categories: string[];
+  /** Root handbook categories as normalized names — `keys`, `gear`, `barter-items`. */
+  handbook: string[];
   wikiLink: string | null;
   /**
    * Only stored when it is not the derivable `assets.tarkov.dev` URL, which covers 5207
@@ -257,7 +292,24 @@ export interface SellItem {
  * next refresh — present in the code, absent from every existing reader's cache, and
  * indistinguishable from a bug. A mismatch makes the catalogue count as behind.
  */
-export const SELL_INDEX_VERSION = 1;
+export const SELL_INDEX_VERSION = 4;
+
+/** What the flea charges to list something. Both rates read 0.05 at time of writing. */
+export interface FleaMarketRates {
+  sellOfferFeeRate: number;
+  sellRequirementFeeRate: number;
+}
+
+/**
+ * The rates to fall back on when the document does not carry them.
+ *
+ * Deliberately the live values and not tarkov.dev's own client-side default of 0.03, which
+ * is stale — the document has said 0.05 since the fee went up.
+ */
+export const DEFAULT_FLEA_RATES: FleaMarketRates = {
+  sellOfferFeeRate: 0.05,
+  sellRequirementFeeRate: 0.05,
+};
 
 export interface SellIndex {
   mode: GameMode;
@@ -267,6 +319,8 @@ export interface SellIndex {
   fetchedAt: number;
   /** Every item that can sit in a stash, keyed by id. Presets excluded. */
   items: Record<string, SellItem>;
+  /** Listing fee rates, read from the same document as the prices they apply to. */
+  fleaMarket: FleaMarketRates;
 }
 
 /** The icon URL, derived where it follows the usual pattern. */
@@ -279,16 +333,52 @@ export function itemPageLink(item: SellItem): string {
   return `https://tarkov.dev/item/${item.normalizedName}`;
 }
 
-/** Trader offers are quoted in the trader's own currency, so only roubles compare. */
-function bestTraderOffer(item: RawItem): { traderId: string; priceRUB: number } | null {
-  let best: { traderId: string; priceRUB: number } | null = null;
-  for (const offer of item.sellToTrader ?? []) {
+/**
+ * The pick of a list of offers, on roubles.
+ *
+ * Trader offers are quoted in the trader's own currency, so only `priceRUB` compares. The
+ * two directions want opposite ends of the same list — the most a trader pays, the least
+ * one charges — which is the whole of the difference between the two callers.
+ */
+function pickOffer(
+  offers: readonly RawTraderOffer[] | undefined,
+  better: (candidate: number, incumbent: number) => boolean,
+): TraderOffer | null {
+  let best: TraderOffer | null = null;
+  for (const offer of offers ?? []) {
     if (!offer?.trader || typeof offer.priceRUB !== "number") continue;
-    if (!best || offer.priceRUB > best.priceRUB) {
-      best = { traderId: offer.trader, priceRUB: offer.priceRUB };
-    }
+    if (best && !better(offer.priceRUB, best.priceRUB)) continue;
+    best = {
+      traderId: offer.trader,
+      priceRUB: offer.priceRUB,
+      price: typeof offer.price === "number" ? offer.price : offer.priceRUB,
+      currency: offer.currency ?? "RUB",
+      minTraderLevel: offer.minTraderLevel ?? null,
+      taskUnlock: offer.taskUnlock ?? null,
+    };
   }
   return best;
+}
+
+/**
+ * Normalized names for an item's categories, resolved through the tree in the document.
+ *
+ * `rootsOnly` keeps just the top of the tree, which is what the handbook side wants: an
+ * item lists its leaf and its root, and only the root makes a chip worth clicking.
+ */
+function categoryNames(
+  ids: readonly string[] | undefined,
+  tree: Record<string, RawCategory>,
+  rootsOnly = false,
+): string[] {
+  const names: string[] = [];
+  for (const id of ids ?? []) {
+    const category = tree[id];
+    if (!category?.normalizedName) continue;
+    if (rootsOnly && category.parent) continue;
+    names.push(category.normalizedName);
+  }
+  return names;
 }
 
 /**
@@ -313,6 +403,10 @@ export async function loadItemCatalogue(
   const wanted = new Set(keyIds);
   const index: ItemIndex = {};
   const sell: Record<string, SellItem> = {};
+  // Both trees are siblings of `items` in the same document, so the category names cost
+  // nothing beyond a lookup — no second fetch, and no ids leaking into the filter module.
+  const itemTree = items.data.itemCategories ?? {};
+  const handbookTree = items.data.handbookCategories ?? {};
 
   for (const [id, item] of Object.entries(collection<RawItem>(items.data, "items"))) {
     const name = text.data[item.name] ?? item.normalizedName ?? id;
@@ -345,7 +439,11 @@ export async function loadItemCatalogue(
       avg24hPrice: item.avg24hPrice ?? null,
       lastLowPrice: item.lastLowPrice ?? null,
       basePrice: item.basePrice ?? null,
-      bestTrader: bestTraderOffer(item),
+      bestTrader: pickOffer(item.sellToTrader, (candidate, best) => candidate > best),
+      buyFrom: pickOffer(item.buyFromTrader, (candidate, best) => candidate < best),
+      types,
+      categories: categoryNames(item.categories, itemTree),
+      handbook: categoryNames(item.handbookCategories, handbookTree, true),
       wikiLink: item.wikiLink ?? null,
     };
     const derivable = `https://assets.tarkov.dev/${id}-icon.webp`;
@@ -355,7 +453,19 @@ export async function loadItemCatalogue(
 
   return {
     index,
-    sell: { mode, version: SELL_INDEX_VERSION, fetchedAt: Date.now(), items: sell },
+    sell: {
+      mode,
+      version: SELL_INDEX_VERSION,
+      fetchedAt: Date.now(),
+      items: sell,
+      fleaMarket: {
+        sellOfferFeeRate:
+          items.data.fleaMarket?.sellOfferFeeRate ?? DEFAULT_FLEA_RATES.sellOfferFeeRate,
+        sellRequirementFeeRate:
+          items.data.fleaMarket?.sellRequirementFeeRate ??
+          DEFAULT_FLEA_RATES.sellRequirementFeeRate,
+      },
+    },
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SELL_INDEX_VERSION, type SellIndex } from "@/lib/tarkovdev/client";
+import { DEFAULT_FLEA_RATES, SELL_INDEX_VERSION, type SellIndex } from "@/lib/tarkovdev/client";
 import type { EconomyBundle } from "@/lib/tarkovdev/economy";
 import { catalogueBehind } from "../app-store";
 import { BUNDLE_TTL_MS } from "../db";
@@ -27,6 +27,7 @@ const sellIndex = (patch: Partial<SellIndex> = {}): SellIndex => ({
   version: SELL_INDEX_VERSION,
   fetchedAt: Date.now(),
   items: {},
+  fleaMarket: DEFAULT_FLEA_RATES,
   ...patch,
 });
 

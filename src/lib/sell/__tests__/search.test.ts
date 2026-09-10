@@ -3,42 +3,22 @@ import { describe, expect, it } from "vitest";
 import type { SellIndex, SellItem } from "@/lib/tarkovdev/client";
 
 import { searchItems } from "../search";
+import { item as build, index as buildIndex } from "./fixtures";
 
-function item(id: string, name: string, shortName: string, normalizedName: string): SellItem {
-  return {
-    id,
-    name,
-    shortName,
-    normalizedName,
-    width: 1,
-    height: 1,
-    noFlea: false,
-    minLevelForFlea: 0,
-    avg24hPrice: null,
-    lastLowPrice: null,
-    basePrice: null,
-    bestTrader: null,
-    wikiLink: null,
-  };
-}
+const item = (id: string, name: string, shortName: string, normalizedName: string): SellItem =>
+  build(id, { name, shortName, normalizedName });
 
-const index: SellIndex = {
-  mode: "regular",
-  fetchedAt: 0,
-  items: Object.fromEntries(
-    [
-      item("a", "Gas analyzer", "Gas", "gas-analyzer"),
-      item("b", "Bundle of wires", "Wires", "bundle-of-wires"),
-      item("c", "Gas mask", "GasMask", "gas-mask"),
-      item("d", "LEDX Skin Transilluminator", "LEDX", "ledx-skin-transilluminator"),
-    ].map((i) => [i.id, i]),
-  ),
-};
+const index: SellIndex = buildIndex([
+  item("a", "Gas analyzer", "Gas", "gas-analyzer"),
+  item("b", "Bundle of wires", "Wires", "bundle-of-wires"),
+  item("c", "Gas mask", "GasMask", "gas-mask"),
+  item("d", "LEDX Skin Transilluminator", "LEDX", "ledx-skin-transilluminator"),
+]);
 
 const found = (query: string) => searchItems(index, query).map((i) => i.id);
 
 describe("searchItems", () => {
-  it("returns nothing for an empty query, because the page shows the keep list instead", () => {
+  it("returns nothing for an empty query, since a lookup with no query has no answer", () => {
     expect(searchItems(index, "")).toEqual([]);
     expect(searchItems(index, "   ")).toEqual([]);
   });
