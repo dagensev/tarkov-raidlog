@@ -87,17 +87,34 @@ export type ServerMessage =
  * Invite tokens.
  *
  * Crockford base32 without the letters that read as digits, so a token survives being
- * spoken aloud or retyped from a screenshot. 8 characters of it is ~40 bits — far more
+ * spoken aloud or retyped from a screenshot. 8 characters of it is ~39 bits — far more
  * than enough that guessing a squad is not worth anyone's time.
+ *
+ * Q is dropped on top of Crockford's own exclusions, because `normalizeToken` folds it to
+ * zero alongside O. Every character here must survive that fold untouched: a generated
+ * token that normalises to something else is shown to its owner as one code and stored
+ * under another. The alphabet is asserted against the fold in `squad-room.test.ts`, so a
+ * character added back here fails a test rather than reaching a squad.
  */
-export const TOKEN_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+export const TOKEN_ALPHABET = "0123456789ABCDEFGHJKMNPRSTVWXYZ";
 export const TOKEN_LENGTH = 8;
 
 export function generateToken(random: Crypto = crypto): string {
-  const bytes = new Uint8Array(TOKEN_LENGTH);
-  random.getRandomValues(bytes);
+  // 31 characters no longer divide 256, so `byte % length` would hand the first 8 symbols
+  // a ninth chance the other 23 do not get. Bytes at or above the last whole multiple are
+  // thrown away and redrawn instead — about 3% of them — which keeps every character
+  // equally likely and the ~39 bits above honest.
+  const limit = 256 - (256 % TOKEN_ALPHABET.length);
   let out = "";
-  for (const byte of bytes) out += TOKEN_ALPHABET[byte % TOKEN_ALPHABET.length];
+  while (out.length < TOKEN_LENGTH) {
+    const bytes = new Uint8Array(TOKEN_LENGTH);
+    random.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (byte >= limit) continue;
+      out += TOKEN_ALPHABET[byte % TOKEN_ALPHABET.length];
+      if (out.length === TOKEN_LENGTH) break;
+    }
+  }
   return out;
 }
 

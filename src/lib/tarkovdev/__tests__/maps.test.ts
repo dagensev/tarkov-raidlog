@@ -5,7 +5,7 @@ import {
   mapsWithTasks,
   resolveMap,
   sceneKey,
-  tarkovDevMapUrl,
+  sceneLabel,
   taskIsOnMap,
 } from "../maps";
 import type { GameMap, Task } from "../types";
@@ -143,10 +143,10 @@ describe("isKnownScene", () => {
   });
 });
 
-describe("tarkovDevMapUrl", () => {
-  it("uses the slug the API supplies", () => {
-    expect(tarkovDevMapUrl(MAPS[10])).toBe("https://tarkov.dev/map/streets-of-tarkov");
-    expect(tarkovDevMapUrl(MAPS[8])).toBe("https://tarkov.dev/map/ground-zero-21");
+describe("sceneLabel", () => {
+  it("turns a bundle name into something readable", () => {
+    expect(sceneLabel("maps/rezerv_base_preset.bundle")).toBe("Rezerv Base");
+    expect(sceneLabel("sandbox_start_preset")).toBe("Sandbox Start");
   });
 });
 

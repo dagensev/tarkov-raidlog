@@ -120,9 +120,21 @@ export function isKnownScene(maps: readonly GameMap[], scene: string): boolean {
   return maps.some((map) => map.scenePath && sceneKey(map.scenePath) === wanted);
 }
 
-/** Link to the map on tarkov.dev, using the slug the API supplies. */
-export function tarkovDevMapUrl(map: GameMap): string {
-  return `https://tarkov.dev/map/${map.normalizedName}`;
+/**
+ * A readable stand-in for a scene bundle that matches no map we know.
+ *
+ * The picker used to show the raw bundle name — `Detect from logs (rezerv_base_preset)`,
+ * which reads as a leak rather than an answer. A recognised scene is named by its map, so
+ * this only runs for one the API does not publish, where the bundle name is still the best
+ * clue available and worth tidying rather than hiding.
+ */
+export function sceneLabel(scene: string): string {
+  return sceneKey(scene)
+    .replace(/_(preset|start|scripts)$/, "")
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 /**

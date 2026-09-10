@@ -8,8 +8,7 @@
  * every page load.
  *
  * Only the ten maps with an SVG are here. The Lab, The Labyrinth and Icebreaker publish
- * raster tiles instead, which this does not render — the panel hides itself for those,
- * the same way `Map3d` hides itself for a map nobody has drawn in 3D.
+ * raster tiles instead, which this does not render — the map card hides itself for those.
  *
  * `live-svg.test.ts` checks each SVG's aspect ratio against these bounds, so a redraw
  * fails a test rather than silently sliding every pin.

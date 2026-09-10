@@ -116,22 +116,36 @@ export function useTaskGraph() {
   return useMemo(() => buildTaskGraph(tasks), [tasks]);
 }
 
-/** The map we believe you are on, honouring a manual override. */
-export function useCurrentMap(): GameMap | undefined {
+/**
+ * The map the logs point at, ignoring any manual override.
+ *
+ * Its own hook because the picker has to name what detection found even while an override
+ * is in force — that is the whole content of its first option.
+ */
+export function useDetectedMap(): GameMap | undefined {
   const maps = useMaps();
-  const override = useAppStore((s) => s.settings.mapOverride);
   const scene = useAppStore((s) => s.raid.scene);
   const location = useAppStore((s) => s.raid.location);
 
   return useMemo(() => {
-    if (maps.length === 0) return undefined;
+    if (maps.length === 0 || (!scene && !location)) return undefined;
+    return resolveMap(maps, { scene, location });
+  }, [maps, scene, location]);
+}
+
+/** The map we believe you are on, honouring a manual override. */
+export function useCurrentMap(): GameMap | undefined {
+  const maps = useMaps();
+  const override = useAppStore((s) => s.settings.mapOverride);
+  const detected = useDetectedMap();
+
+  return useMemo(() => {
     if (override) {
       const chosen = maps.find((m) => m.id === override);
       if (chosen) return chosen;
     }
-    if (!scene && !location) return undefined;
-    return resolveMap(maps, { scene, location });
-  }, [maps, override, scene, location]);
+    return detected;
+  }, [maps, override, detected]);
 }
 
 /**

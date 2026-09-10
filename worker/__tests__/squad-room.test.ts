@@ -1,7 +1,14 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import { isValidToken, normalizeToken, type ServerMessage } from "../protocol";
+import {
+  TOKEN_ALPHABET,
+  TOKEN_LENGTH,
+  generateToken,
+  isValidToken,
+  normalizeToken,
+  type ServerMessage,
+} from "../protocol";
 
 /**
  * Runs inside workerd, so the Durable Object, its SQLite storage and WebSocket
@@ -84,6 +91,23 @@ async function createSquad(): Promise<string> {
 
 const member = (id: string, name: string) => ({ id, name });
 
+describe("invite tokens", () => {
+  it("draws only from characters normalisation leaves alone", () => {
+    for (const char of TOKEN_ALPHABET) {
+      expect(normalizeToken(char)).toBe(char);
+    }
+  });
+
+  it("generates canonical tokens of the right length", () => {
+    for (let i = 0; i < 200; i++) {
+      const token = generateToken();
+      expect(token).toHaveLength(TOKEN_LENGTH);
+      expect(normalizeToken(token)).toBe(token);
+      expect(isValidToken(token)).toBe(true);
+    }
+  });
+});
+
 describe("squad API", () => {
   it("creates a squad with a usable token and invite link", async () => {
     const response = await SELF.fetch(`${ORIGIN}/api/squad`, { method: "POST" });
@@ -103,10 +127,22 @@ describe("squad API", () => {
   });
 
   it("turns a short invite link into the join page", async () => {
-    const token = await createSquad();
-    const response = await SELF.fetch(`${ORIGIN}/j/${token}`, { redirect: "manual" });
+    // A fixed token, not a freshly created one: the redirect normalises what it is given,
+    // so a random draw that happened to need normalising used to fail this comparison.
+    // What the token normalises to is the subject of its own test below.
+    const response = await SELF.fetch(`${ORIGIN}/j/ABCD1234`, { redirect: "manual" });
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toContain(`/squad/?join=${token}`);
+    expect(response.headers.get("Location")).toContain("/squad/?join=ABCD1234");
+  });
+
+  it("hands out a token that is already in its canonical form", async () => {
+    // The invite link carries the raw token and the room is keyed on the normalised one, so
+    // a token that changes under normalisation is shown to its owner as one code and stored
+    // under another. Q used to be in the alphabet and folds to zero.
+    const response = await SELF.fetch(`${ORIGIN}/api/squad`, { method: "POST" });
+    const body = (await response.json()) as { token: string; join: string };
+    expect(normalizeToken(body.token)).toBe(body.token);
+    expect(body.join).toContain(`/j/${normalizeToken(body.token)}`);
   });
 
   it("accepts a token typed with the characters people confuse", async () => {

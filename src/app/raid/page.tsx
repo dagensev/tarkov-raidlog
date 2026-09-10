@@ -3,14 +3,15 @@
 import { useMemo } from 'react';
 
 import { ItemIcon } from '@/components/item-icon';
-import { Map3d } from '@/components/map-3d';
 import { ObjectiveMap } from '@/components/objective-map';
+import { ScreenshotBanner } from '@/components/screenshot-banner';
 import { TaskRow, rowStatus } from '@/components/task-row';
 import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { objectivePins } from '@/lib/maps/pins';
 import { useAppStore } from '@/lib/store/app-store';
-import { useAvailability, useCurrentMap, useMaps, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
-import { foldedMapIds, tarkovDevMapUrl, taskIsOnMap } from '@/lib/tarkovdev/maps';
+import { useAvailability, useCurrentMap, useDetectedMap, useMaps, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
+import { foldedMapIds, sceneLabel, taskIsOnMap } from '@/lib/tarkovdev/maps';
+import { map3d } from '@/lib/tarkovdev/maps-3d';
 
 /**
  * The raid board.
@@ -24,6 +25,11 @@ function MapPicker() {
     const override = useAppStore((s) => s.settings.mapOverride);
     const update = useAppStore((s) => s.updateSettings);
     const scene = useAppStore((s) => s.raid.scene);
+    const detected = useDetectedMap();
+
+    // Name what detection found rather than echoing the bundle it read: the map itself if
+    // the API knows the scene, else a tidied bundle name for one it does not publish.
+    const detectedLabel = detected?.name ?? (scene ? sceneLabel(scene) : null);
 
     return (
         <div className='flex flex-wrap items-center gap-2'>
@@ -32,7 +38,7 @@ function MapPicker() {
                 onChange={(e) => void update({ mapOverride: e.target.value || null })}
                 className='data border border-line-bright bg-ground-2 px-2 py-1.5 text-[12px] text-bone focus:border-amber-dim focus:outline-none'
             >
-                <option value=''>Detect from logs{scene ? ` (${scene})` : ''}</option>
+                <option value=''>Detect from logs{detectedLabel ? ` (${detectedLabel})` : ''}</option>
                 {maps.map((map) => (
                     <option key={map.id} value={map.id}>
                         {map.name}
@@ -87,6 +93,7 @@ export default function RaidPage() {
     }, [holding, map]);
 
     const maps = useMaps();
+    const render3d = map3d(map);
     const trail = useAppStore((s) => s.trail);
     const showPins = useAppStore((s) => s.settings.showObjectivePins);
     const update = useAppStore((s) => s.updateSettings);
@@ -122,14 +129,6 @@ export default function RaidPage() {
                         <div className='flex flex-wrap items-center gap-x-5 gap-y-1'>
                             {map.raidDuration ? <span className='data text-[11px] text-bone-dim'>{map.raidDuration} min</span> : null}
                             {map.players ? <span className='data text-[11px] text-bone-dim'>{map.players} players</span> : null}
-                            <a
-                                href={tarkovDevMapUrl(map)}
-                                target='_blank'
-                                rel='noreferrer'
-                                className='stencil text-[10px] text-muted underline decoration-line-bright underline-offset-4 transition-colors hover:text-amber'
-                            >
-                                Interactive map ↗
-                            </a>
                             {map.wiki ? (
                                 <a
                                     href={map.wiki}
@@ -140,6 +139,17 @@ export default function RaidPage() {
                                     Wiki ↗
                                 </a>
                             ) : null}
+                            {render3d ? (
+                                <a
+                                    href={render3d.image}
+                                    target='_blank'
+                                    rel='noreferrer'
+                                    title={`The full-size 3D render of ${map.name}, drawn by ${render3d.author}`}
+                                    className='stencil text-[10px] text-muted underline decoration-line-bright underline-offset-4 transition-colors hover:text-amber'
+                                >
+                                    3D map ↗
+                                </a>
+                            ) : null}
                         </div>
                     </div>
                     <MapPicker />
@@ -147,16 +157,17 @@ export default function RaidPage() {
                 {map.description ? <p className='border-t border-line px-4 py-3 text-[12px] leading-relaxed text-muted'>{map.description}</p> : null}
             </Panel>
 
-            {/* Keyed on the map so the load state starts fresh when you switch. These are sibling panels and must have distinct keys. */}
+            <ScreenshotBanner />
+
+            {/* Keyed on the map so the load state starts fresh when you switch. */}
             <ObjectiveMap
-                key={`objective-${map.id}`}
+                key={map.id}
                 map={map}
                 pins={pins}
                 trail={trail}
                 showPins={showPins}
                 onTogglePins={() => void update({ showObjectivePins: !showPins })}
             />
-            <Map3d key={map.id} map={map} />
 
             {keys.length > 0 ? (
                 <Panel className='rise border-rust/30' style={{ animationDelay: '60ms' }}>
