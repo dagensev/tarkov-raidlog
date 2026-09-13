@@ -63,7 +63,14 @@ export interface PriceContext extends FeeOptions {
 
 const NO_RATES: FleaMarketRates = { sellOfferFeeRate: 0, sellRequirementFeeRate: 0 };
 
-function named(
+/**
+ * An offer with its trader spelled out.
+ *
+ * Exported because the crafts calculator labels the same offers — where an ingredient
+ * comes from is the same question as where an item is bought — and a second copy of three
+ * lines would be a second place to forget the id fallback.
+ */
+export function namedOffer(
   offer: TraderOffer | null,
   traderNames: ReadonlyMap<string, string>,
 ): NamedOffer | null {
@@ -78,8 +85,10 @@ export function sellRow(
 ): SellRow {
   const traderNames = context.traderNames ?? new Map<string, string>();
   const flea = fleaPrice(item);
-  const trader = named(item.bestTrader, traderNames);
-  const buy = named(item.buyFrom, traderNames);
+  const trader = namedOffer(item.bestTrader, traderNames);
+  // The front of the list is the cheapest offer at any loyalty level, which is what this
+  // page has always shown. The crafts calculator is the one that filters on loyalty.
+  const buy = namedOffer(item.buyOffers[0] ?? null, traderNames);
 
   const fleaFee =
     flea === null ? null : fleaMarketFee(item.basePrice, flea, context.rates, context);

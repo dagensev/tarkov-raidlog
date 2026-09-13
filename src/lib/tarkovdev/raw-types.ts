@@ -118,6 +118,27 @@ export interface RawTask {
   neededKeys: RawNeededKeys[];
   taskImageLink?: string | null;
   restartable?: boolean;
+  /**
+   * What accepting and finishing the task hand out. Only `craftUnlock` is read: it is the
+   * one place a craft's quest gate survives when tarkov.dev's craft importer failed to
+   * attach it to the craft itself. See `@/lib/crafts/unlocks`.
+   */
+  startRewards?: RawTaskRewards | null;
+  finishRewards?: RawTaskRewards | null;
+}
+
+export interface RawTaskRewards {
+  craftUnlock?: RawCraftUnlock[];
+}
+
+/** A craft a task makes available, named by where it is made and what it makes. */
+export interface RawCraftUnlock {
+  /** Hideout station id. */
+  station: string;
+  /** Product item id. */
+  item: string;
+  level?: number;
+  count?: number;
 }
 
 export interface RawTasksData {
@@ -217,6 +238,15 @@ export interface RawItem {
   types?: string[];
   /** Character level the flea market requires before this can be listed. 0 for most. */
   minLevelForFlea?: number | null;
+  /**
+   * The per-kind property bag, of which only the resource one is read.
+   *
+   * Five items carry `ItemPropertiesResource`, two of them the generator fuel tanks, and
+   * `units` is how much a full one holds — 100 for the metal tank, 60 for the
+   * expeditionary. Everything else in the bag belongs to a kind of item this app has no
+   * column for.
+   */
+  properties?: { propertiesType?: string; units?: number } | null;
   basePrice?: number | null;
   avg24hPrice?: number | null;
   lastLowPrice?: number | null;
@@ -280,6 +310,8 @@ export interface RawItemRequirement {
     foundInRaid?: boolean;
     /** Craft only: the item must be present but is handed back afterwards. */
     tool?: boolean;
+    /** Craft only: the item has to be undamaged. Nothing prices differently for it. */
+    functional?: boolean;
   };
 }
 
@@ -330,8 +362,15 @@ export interface RawCraft {
   requiredItems: RawItemRequirement[];
   requiredQuestItems?: unknown[];
   productItem: RawItemRequirement;
+  /** Seconds the craft takes, before any Crafting skill reduction. */
   duration?: number;
+  /**
+   * Game editions the craft is exclusive to. Empty for all but one — the Edge of
+   * Darkness stimulant injector.
+   */
   gameEditions?: string[];
+  /** Task that unlocks the craft, or null. 33 of 214 have one. */
+  taskUnlock?: string | null;
 }
 
 /** Barters and crafts are both keyed by array index off `data`. */

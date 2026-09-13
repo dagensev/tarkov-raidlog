@@ -264,10 +264,15 @@ export interface SellItem {
   /** The best price a trader pays, chosen on roubles. */
   bestTrader: TraderOffer | null;
   /**
-   * The cheapest a trader sells it for, chosen on roubles, whatever loyalty level that
-   * offer needs. Null for the 2436 items no trader stocks.
+   * Every trader offer to sell it to you, cheapest first. Empty for the 2436 items no
+   * trader stocks.
+   *
+   * A list rather than the single cheapest, because the cheapest is often one you cannot
+   * reach: 55 items are stocked at more than one loyalty level, and pricing a craft
+   * ingredient at a level 4 offer you do not have is a profit figure that does not
+   * exist. Where loyalty does not matter, read the front of the list.
    */
-  buyFrom: TraderOffer | null;
+  buyOffers: TraderOffer[];
   /** tarkov.dev's own tags, e.g. `barter`, `keys`, `noFlea`. Presets never reach here. */
   types: string[];
   /**
@@ -283,6 +288,14 @@ export interface SellItem {
    * of 5320 items. Read it through `itemIconLink`, never directly.
    */
   iconLink?: string;
+  /**
+   * How much of its resource a full one holds, for the five items that have one.
+   *
+   * Only the two generator fuel tanks are ever read — 100 units for the metal one, 60 for
+   * the expeditionary — and the crafts calculator divides a tank's price by it to reach
+   * what an hour of generator time costs. Absent on everything else.
+   */
+  resourceUnits?: number;
 }
 
 /**
@@ -292,7 +305,7 @@ export interface SellItem {
  * next refresh — present in the code, absent from every existing reader's cache, and
  * indistinguishable from a bug. A mismatch makes the catalogue count as behind.
  */
-export const SELL_INDEX_VERSION = 4;
+export const SELL_INDEX_VERSION = 5;
 
 /** What the flea charges to list something. Both rates read 0.05 at time of writing. */
 export interface FleaMarketRates {
@@ -333,12 +346,42 @@ export function itemPageLink(item: SellItem): string {
   return `https://tarkov.dev/item/${item.normalizedName}`;
 }
 
+/** One raw offer narrowed to what a row renders, or null when it is not a usable one. */
+function narrowOffer(offer: RawTraderOffer | undefined): TraderOffer | null {
+  if (!offer?.trader || typeof offer.priceRUB !== "number") return null;
+  return {
+    traderId: offer.trader,
+    priceRUB: offer.priceRUB,
+    price: typeof offer.price === "number" ? offer.price : offer.priceRUB,
+    currency: offer.currency ?? "RUB",
+    minTraderLevel: offer.minTraderLevel ?? null,
+    taskUnlock: offer.taskUnlock ?? null,
+  };
+}
+
+/**
+ * Every offer in a list, cheapest first.
+ *
+ * The buy side keeps all of them rather than the cheapest, because which one you can
+ * actually take depends on your loyalty. Sorted here rather than at each reader: the list
+ * is at most three long and is built once per catalogue download, against a crafts table
+ * that walks it for every ingredient of every craft on every keystroke.
+ */
+function offerList(offers: readonly RawTraderOffer[] | undefined): TraderOffer[] {
+  const out: TraderOffer[] = [];
+  for (const offer of offers ?? []) {
+    const narrowed = narrowOffer(offer);
+    if (narrowed) out.push(narrowed);
+  }
+  return out.sort((a, b) => a.priceRUB - b.priceRUB);
+}
+
 /**
  * The pick of a list of offers, on roubles.
  *
- * Trader offers are quoted in the trader's own currency, so only `priceRUB` compares. The
- * two directions want opposite ends of the same list — the most a trader pays, the least
- * one charges — which is the whole of the difference between the two callers.
+ * Trader offers are quoted in the trader's own currency, so only `priceRUB` compares. Only
+ * the sell side comes through here, wanting the most any trader pays; the buy side keeps
+ * every offer, because which of them you can take depends on your loyalty.
  */
 function pickOffer(
   offers: readonly RawTraderOffer[] | undefined,
@@ -346,16 +389,10 @@ function pickOffer(
 ): TraderOffer | null {
   let best: TraderOffer | null = null;
   for (const offer of offers ?? []) {
-    if (!offer?.trader || typeof offer.priceRUB !== "number") continue;
-    if (best && !better(offer.priceRUB, best.priceRUB)) continue;
-    best = {
-      traderId: offer.trader,
-      priceRUB: offer.priceRUB,
-      price: typeof offer.price === "number" ? offer.price : offer.priceRUB,
-      currency: offer.currency ?? "RUB",
-      minTraderLevel: offer.minTraderLevel ?? null,
-      taskUnlock: offer.taskUnlock ?? null,
-    };
+    const narrowed = narrowOffer(offer);
+    if (!narrowed) continue;
+    if (best && !better(narrowed.priceRUB, best.priceRUB)) continue;
+    best = narrowed;
   }
   return best;
 }
@@ -440,7 +477,7 @@ export async function loadItemCatalogue(
       lastLowPrice: item.lastLowPrice ?? null,
       basePrice: item.basePrice ?? null,
       bestTrader: pickOffer(item.sellToTrader, (candidate, best) => candidate > best),
-      buyFrom: pickOffer(item.buyFromTrader, (candidate, best) => candidate < best),
+      buyOffers: offerList(item.buyFromTrader),
       types,
       categories: categoryNames(item.categories, itemTree),
       handbook: categoryNames(item.handbookCategories, handbookTree, true),
@@ -448,6 +485,11 @@ export async function loadItemCatalogue(
     };
     const derivable = `https://assets.tarkov.dev/${id}-icon.webp`;
     if (item.iconLink && item.iconLink !== derivable) entry.iconLink = item.iconLink;
+    // Set rather than defaulted to null, so the field costs nothing on the 5315 items with
+    // no resource to speak of.
+    if (item.properties?.propertiesType === "ItemPropertiesResource" && item.properties.units) {
+      entry.resourceUnits = item.properties.units;
+    }
     sell[id] = entry;
   }
 

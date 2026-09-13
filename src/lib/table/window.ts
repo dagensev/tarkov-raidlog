@@ -8,9 +8,12 @@
  * Pure arithmetic with the component kept thin, the same split `@/lib/maps/viewport` uses
  * for the map overlay: scroll maths is fiddly at the edges and off-by-ones there show up
  * as rows that flicker or vanish, which is far easier to assert than to notice.
+ *
+ * It lives outside `@/lib/sell` because there is nothing about selling in it, and the
+ * crafts table was the second caller that proved as much.
  */
 
-/** The one row that can be taller than the rest, because its uses are expanded. */
+/** The one row that can be taller than the rest, because it is expanded. */
 export interface OpenRow {
   index: number;
   /** Height of the expanded part alone, on top of the row's own `rowHeight`. */

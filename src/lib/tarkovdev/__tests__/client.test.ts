@@ -406,7 +406,7 @@ describe("loadItemCatalogue", () => {
 
   it("keeps the quoted price and its currency, which is what the trader's screen shows", async () => {
     const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
-    expect(sell.items.key1.buyFrom).toEqual({
+    expect(sell.items.key1.buyOffers[0]).toEqual({
       traderId: "peacekeeper",
       priceRUB: 7600,
       price: 40,
@@ -416,15 +416,20 @@ describe("loadItemCatalogue", () => {
     });
   });
 
-  it("picks the cheapest trader to buy from, the opposite end from the sell side", async () => {
+  it("orders buy offers cheapest first, on roubles rather than the quoted number", async () => {
     // Skier's 9000 roubles beats Peacekeeper's 40 on the quoted number and loses on roubles.
     const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
-    expect(sell.items.key1.buyFrom?.priceRUB).toBe(7600);
+    expect(sell.items.key1.buyOffers.map((each) => each.priceRUB)).toEqual([7600, 9000]);
   });
 
-  it("reports no buy offer for an item no trader stocks", async () => {
+  it("keeps every buy offer, since which one you can take depends on your loyalty", async () => {
     const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
-    expect(sell.items.lamp.buyFrom).toBeNull();
+    expect(sell.items.key1.buyOffers.map((each) => each.minTraderLevel)).toEqual([2, 3]);
+  });
+
+  it("reports no buy offers for an item no trader stocks", async () => {
+    const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
+    expect(sell.items.lamp.buyOffers).toEqual([]);
   });
 
   it("resolves categories to names, and keeps only the root of the handbook tree", async () => {

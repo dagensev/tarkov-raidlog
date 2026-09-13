@@ -73,7 +73,7 @@ Three suites talk to the outside world and self-skip when it is absent, so a cle
 
 - `src/lib/store/app-store.ts` — zustand: log status, parsed events, fetched bundles, raid state, and the per-tab view controls. Watchers, poll timers, socket handles and in-flight latches deliberately live in module scope, not in reactive state.
 - `src/lib/store/squad-store.ts` — the socket half, kept apart because its lifecycle is a WebSocket rather than a folder.
-- `src/lib/store/db.ts` — one IndexedDB key-value store via `idb`. It persists the granted `FileSystemDirectoryHandle`, which is the one piece of state that cannot be rebuilt.
+- `src/lib/store/db.ts` — one IndexedDB key-value store via `idb`. It persists the granted `FileSystemDirectoryHandle`, which is the one piece of state that cannot be rebuilt. `Settings` also holds the things no log and no API can tell us: hideout levels, trader loyalty, the two character skills, and how the crafts table should price a craft.
 - `src/lib/store/hooks.ts` — derived views. These are `useMemo` hooks, not zustand selectors, because they return fresh objects that would fail zustand's identity check and recompute availability over ~500 tasks on every unrelated store change.
 
 ### Domain layers
@@ -81,11 +81,15 @@ Three suites talk to the outside world and self-skip when it is absent, so a cle
 - `src/lib/graph/` — graphology task graph and availability, ported from TarkovTracker. A requirement with status `active` inherits the prerequisite's predecessors instead of drawing a direct edge.
 - `src/lib/maps/` — `calibration.ts` vendors tarkov.dev's per-map bounds and rotation; `project.ts` turns a game coordinate into a fraction across the SVG with no map library; `viewport.ts` holds the zoom, pan and clamp arithmetic so it can be tested without a DOM.
 - `src/lib/sell/` — flea market keep list, fee model and verdicts.
+- `src/lib/crafts/` — the crafts calculator. `pricing.ts` answers what an item costs to get and what it clears when sold, honouring recorded trader loyalty; `fuel.ts` holds the two facts in the app that came from outside tarkov.dev, the generator burn rate and which stations run without power (only the Lavatory); `unlocks.ts` puts back the quest gates tarkov.dev's crafts document drops, from the tasks' `craftUnlock` rewards; `craft-row.ts` costs a craft end to end and reads logged task progress to say whether it can run; `filters.ts` is its view state.
+- `src/lib/table/` — `window.ts`, the row windowing arithmetic. Under `sell/` until the crafts table proved there was nothing about selling in it.
 - `src/lib/tasks/` — filtering, sorting and map options for the task list.
 
 ## Conventions that bite
 
 - **The logs are the only source of task progress.** There is no manual override, and the ability to mark a task done by hand was deliberately removed.
+- **Both cached catalogue halves are versioned, and both gates matter.** `SELL_INDEX_VERSION` and `ECONOMY_BUNDLE_VERSION` make `catalogueBehind` refetch, but a cache lives a day, so `useSellIndex` and `useEconomy` also refuse to serve a copy of the wrong version — otherwise today's components read yesterday's fields until the download lands. Bump the version in the same change that adds or renames a field.
+- **A craft ingredient count comes in two shapes.** `ItemRequirement.count` is ceilinged for anything shown to the reader; `exactCount` is the unrounded figure, and costing must use it. Purified water asks for 0.66 of a water filter.
 - **`globals.css` zooms the root element**, so laid-out pixels and drawn pixels differ by a constant. Anything read from `getBoundingClientRect()`, `clientX/Y` or `window.innerHeight` that ends up back in a CSS length must be divided by `uiScale()` from `src/lib/ui-scale.ts`.
 - **Keep log regexes non-global.** They are reused across calls, and `lastIndex` would carry between them.
 - Comments here carry the reasoning, often at length, and cite the source that was ported or the observation that forced the shape. Match that when editing.

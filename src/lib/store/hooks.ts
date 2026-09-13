@@ -2,6 +2,10 @@
 
 import { useMemo } from "react";
 
+import { craftRows, type CraftRow } from "@/lib/crafts/craft-row";
+import { FUEL_TANKS, fuelRoublesPerHour, solarPowerBuilt } from "@/lib/crafts/fuel";
+import { fleaPrice, type MarketContext } from "@/lib/crafts/pricing";
+import { craftUnlockIndex } from "@/lib/crafts/unlocks";
 import { computeAvailability, type TaskAvailability } from "@/lib/graph/availability";
 import { buildTaskGraph } from "@/lib/graph/task-graph";
 import { deriveTaskStates, summarize, type TaskState } from "@/lib/logs/progress";
@@ -9,8 +13,17 @@ import type { ProfileGeneration } from "@/lib/logs/wipe";
 import { intelligenceCenterLevel } from "@/lib/sell/hideout-levels";
 import { buildKeepList, type KeepList } from "@/lib/sell/keep-list";
 import { catalogueRows, type PriceContext, type SellRow } from "@/lib/sell/verdict";
-import { DEFAULT_FLEA_RATES, denormalize, type SellIndex } from "@/lib/tarkovdev/client";
-import type { EconomyBundle, HideoutStation } from "@/lib/tarkovdev/economy";
+import {
+  DEFAULT_FLEA_RATES,
+  SELL_INDEX_VERSION,
+  denormalize,
+  type SellIndex,
+} from "@/lib/tarkovdev/client";
+import {
+  ECONOMY_BUNDLE_VERSION,
+  type EconomyBundle,
+  type HideoutStation,
+} from "@/lib/tarkovdev/economy";
 import { mapsWithTasks, resolveMap } from "@/lib/tarkovdev/maps";
 import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
 import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
@@ -28,6 +41,7 @@ const EMPTY_TASKS: Task[] = [];
 const EMPTY_MAPS: GameMap[] = [];
 const EMPTY_KEEP: KeepList = new Map();
 const EMPTY_ROWS: SellRow[] = [];
+const EMPTY_CRAFT_ROWS: CraftRow[] = [];
 const EMPTY_STATIONS: HideoutStation[] = [];
 
 /**
@@ -187,20 +201,26 @@ export function useProgressCounts() {
 /**
  * Hideout, barter and craft data, once it matches the loaded task set.
  *
- * The mode check matters because only one copy of each document is cached: switching to
- * PvE refetches everything, and until it lands the cached copy belongs to the mode you
- * just left. Serving that would put regular-mode barters on a PvE sell check.
+ * Two gates, for the same reason. Only one copy of each document is cached, so switching
+ * to PvE refetches everything and until it lands the cached copy belongs to the mode you
+ * just left — serving that would put regular-mode barters on a PvE sell check. And a cache
+ * lives a day, so after a release that changed the entry shape the copy on disk is the old
+ * shape; serving that hands today's components yesterday's fields. `catalogueBehind`
+ * already knows to refetch in both cases, and these two are what stop the page rendering
+ * from the wrong copy while it does.
  */
 export function useEconomy(): EconomyBundle | null {
   const economy = useAppStore((s) => s.economy);
   const mode = useGameMode();
-  return economy && economy.mode === mode ? economy : null;
+  if (!economy) return null;
+  return economy.mode === mode && economy.version === ECONOMY_BUNDLE_VERSION ? economy : null;
 }
 
 export function useSellIndex(): SellIndex | null {
   const index = useAppStore((s) => s.sellIndex);
   const mode = useGameMode();
-  return index && index.mode === mode ? index : null;
+  if (!index) return null;
+  return index.mode === mode && index.version === SELL_INDEX_VERSION ? index : null;
 }
 
 /** Trader id to name, for labelling the barters that want an item. */
@@ -243,6 +263,8 @@ export function usePriceContext(): PriceContext {
   const traderNames = useTraderNames();
   const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
 
+  const hideoutManagement = useAppStore((s) => s.settings.hideoutManagement);
+
   const rates = index?.fleaMarket ?? DEFAULT_FLEA_RATES;
   const stations = economy?.stations ?? EMPTY_STATIONS;
 
@@ -251,8 +273,9 @@ export function usePriceContext(): PriceContext {
       rates,
       traderNames,
       intelligenceCenter: intelligenceCenterLevel(hideoutLevels, stations),
+      hideoutManagement,
     }),
-    [rates, traderNames, hideoutLevels, stations],
+    [rates, traderNames, hideoutLevels, stations, hideoutManagement],
   );
 }
 
@@ -276,4 +299,140 @@ export function useSellRows(): SellRow[] {
     () => (index ? catalogueRows(index, keep, context) : EMPTY_ROWS),
     [keep, index, context],
   );
+}
+
+/**
+ * What an hour of generator time costs, and where the figure came from.
+ *
+ * Derived from the chosen tank's own flea price unless the reader has typed a number,
+ * which is the escape hatch for everything the derivation leaves out — the Hideout
+ * Management reduction chiefly. `derived` is the untouched figure, so the field can show
+ * what it is overriding rather than merely accepting a number in place of one.
+ */
+export function useFuelCost(): {
+  roublesPerHour: number | null;
+  derived: number | null;
+  overridden: boolean;
+  tank: (typeof FUEL_TANKS)[number];
+  tankPrice: number | null;
+  solarPower: boolean;
+} {
+  const index = useSellIndex();
+  const economy = useEconomy();
+  const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
+  const tankId = useAppStore((s) => s.settings.fuelTankId);
+  const override = useAppStore((s) => s.settings.fuelRoublesPerHour);
+  const basis = useAppStore((s) => s.settings.craftFleaBasis);
+
+  const stations = economy?.stations ?? EMPTY_STATIONS;
+
+  return useMemo(() => {
+    const tank = FUEL_TANKS.find((each) => each.itemId === tankId) ?? FUEL_TANKS[0];
+    const item = index?.items[tank.itemId] ?? null;
+    // The tank is bought like any other ingredient, so it is priced on the same basis the
+    // ingredients are. Using the average here and the last low there would make the fuel
+    // line disagree with the rest of the row for no reason the reader could see.
+    const tankPrice = item ? fleaPrice(item, basis) : null;
+    const solarPower = solarPowerBuilt(hideoutLevels, stations);
+    const derived = fuelRoublesPerHour({
+      tankPrice,
+      tankUnits: item?.resourceUnits,
+      solarPower,
+    });
+    const overridden = typeof override === "number" && override >= 0;
+    return {
+      roublesPerHour: overridden ? override : derived,
+      derived,
+      overridden,
+      tank,
+      tankPrice,
+      solarPower,
+    };
+  }, [index, stations, hideoutLevels, tankId, override, basis]);
+}
+
+/**
+ * The rows the crafts calculator renders: one per craft.
+ *
+ * Built once per data or assumption change, then filtered per keystroke, exactly as
+ * `useSellRows` is — and for the same reason. Pricing 213 crafts walks a few hundred
+ * ingredients through the catalogue, which is cheap once and wasteful on every character
+ * typed into the search box.
+ */
+export function useCraftRows(): CraftRow[] {
+  const economy = useEconomy();
+  const index = useSellIndex();
+  const traderNames = useTraderNames();
+  const price = usePriceContext();
+  const fuel = useFuelCost();
+
+  const bundle = useAppStore((s) => s.bundle);
+  const events = useAppStore((s) => s.events);
+  const taskStates = useTaskStates();
+  // Off the raw tasks the core bundle already caches whole, so recovering a dropped gate
+  // costs no fetch. Keyed on the bundle alone, which changes once a day.
+  const craftUnlocks = useMemo(() => craftUnlockIndex(bundle?.tasks ?? {}), [bundle]);
+  // No events means no logs, and with no logs the page cannot say a task is unfinished —
+  // which is a different thing from knowing that it is.
+  const knownTaskStates = events.length > 0 ? taskStates : null;
+
+  const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
+  const traderLevels = useAppStore((s) => s.settings.traderLevels);
+  const inputSource = useAppStore((s) => s.settings.craftInputSource);
+  const outputSource = useAppStore((s) => s.settings.craftOutputSource);
+  const basis = useAppStore((s) => s.settings.craftFleaBasis);
+  const respectLoyalty = useAppStore((s) => s.settings.craftRespectLoyalty);
+  const includeFuel = useAppStore((s) => s.settings.craftIncludeFuel);
+  const craftingSkill = useAppStore((s) => s.settings.craftingSkill);
+
+  const market: MarketContext = useMemo(
+    () => ({
+      rates: price.rates,
+      traderNames,
+      // Null rather than an empty record: the two mean different things here. A record
+      // says "check these levels", where a missing trader reads as level 1; null says
+      // "loyalty is not part of the question", and every offer counts.
+      traderLevels: respectLoyalty ? traderLevels : null,
+      basis,
+      intelligenceCenter: price.intelligenceCenter,
+      hideoutManagement: price.hideoutManagement,
+    }),
+    [price, traderNames, traderLevels, respectLoyalty, basis],
+  );
+
+  return useMemo(() => {
+    if (!economy || !index) return EMPTY_CRAFT_ROWS;
+    return craftRows(economy.crafts, economy.stations, index, {
+      market,
+      inputSource,
+      outputSource,
+      craftingSkill,
+      fuelRoublesPerHour: includeFuel ? fuel.roublesPerHour : null,
+      hideoutLevels,
+      craftUnlocks,
+      taskStates: knownTaskStates,
+    });
+  }, [
+    craftUnlocks,
+    knownTaskStates,
+    economy,
+    index,
+    market,
+    inputSource,
+    outputSource,
+    craftingSkill,
+    includeFuel,
+    fuel.roublesPerHour,
+    hideoutLevels,
+  ]);
+}
+
+/** The stations that actually have crafts, for the filter chips. */
+export function useCraftStations(): HideoutStation[] {
+  const economy = useEconomy();
+  return useMemo(() => {
+    if (!economy) return EMPTY_STATIONS;
+    const used = new Set(economy.crafts.map((craft) => craft.stationId));
+    return economy.stations.filter((station) => used.has(station.id));
+  }, [economy]);
 }

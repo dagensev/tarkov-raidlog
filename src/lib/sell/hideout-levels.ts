@@ -1,20 +1,25 @@
 /**
- * Editing the hideout record.
+ * Editing the two records the reader types by hand: hideout levels and trader loyalty.
  *
  * Its own module rather than a closure in the component so the distinction that matters
- * can be asserted: forgetting a station removes its key, which is "not told", while
- * setting zero writes one, which is "not built". The two want the same upgrade items but
- * only one of them stops crafts you cannot run from padding the keep list.
+ * can be asserted: clearing an entry removes its key, which is "not told", while setting
+ * zero writes one. For a station zero is "not built", which stops crafts you cannot run
+ * from padding the keep list; for Fence it is a real loyalty level. Either way "not told"
+ * is its own answer, and every reader of these records treats it differently from any
+ * number.
+ *
+ * One function for both, because the two records have exactly the same shape and exactly
+ * the same rule, and a second copy would be a second place for the rule to drift.
  */
 
-export function nextHideoutLevels(
+export function nextLevels(
   current: Readonly<Record<string, number>>,
-  stationId: string,
+  id: string,
   level: number | null,
 ): Record<string, number> {
   const next = { ...current };
-  if (level === null) delete next[stationId];
-  else if (Number.isFinite(level)) next[stationId] = Math.max(0, Math.floor(level));
+  if (level === null) delete next[id];
+  else if (Number.isFinite(level)) next[id] = Math.max(0, Math.floor(level));
   return next;
 }
 

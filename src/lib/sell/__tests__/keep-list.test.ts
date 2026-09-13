@@ -61,15 +61,25 @@ function states(entries: Record<string, TaskStatus>): Map<string, TaskState> {
 }
 
 function station(id: string, levels: HideoutStation["levels"]): HideoutStation {
-  return { id, name: id, normalizedName: id, levels };
+  return { id, name: id, normalizedName: id, levels, imageLink: null };
 }
 
 const line = (itemId: string, count = 1, extra: Partial<{ foundInRaid: boolean; tool: boolean }> = {}) => ({
   itemId,
   count,
+  // The keep list only ever reads the ceilinged count; the exact one is the crafts
+  // calculator's, and here it just has to be present and agree.
+  exactCount: count,
   foundInRaid: extra.foundInRaid ?? false,
   tool: extra.tool ?? false,
 });
+
+/** Craft fields nothing in the keep list reads, but the type requires. */
+const CRAFT_TIMING: Pick<Craft, "durationSeconds" | "taskUnlock" | "gameEditions"> = {
+  durationSeconds: 3600,
+  taskUnlock: null,
+  gameEditions: [],
+};
 
 const ids = (map: Map<string, unknown>) => [...map.keys()].sort();
 
@@ -287,6 +297,9 @@ describe("craftReasons", () => {
     level: 2,
     requiredItems: [line("wires", 3), line("wrench", 1, { tool: true })],
     productItem: { itemId: "ammo", count: 60 },
+    durationSeconds: 3600,
+    taskUnlock: null,
+    gameEditions: [],
     ...overrides,
   });
 
@@ -337,6 +350,7 @@ describe("buildKeepList", () => {
         level: 1,
         requiredItems: [line("wrench", 1, { tool: true })],
         productItem: { itemId: "ammo", count: 60 },
+        ...CRAFT_TIMING,
       },
       {
         id: "c2",
@@ -344,6 +358,7 @@ describe("buildKeepList", () => {
         level: 1,
         requiredItems: [line("wrench", 1, { tool: true })],
         productItem: { itemId: "meds", count: 1 },
+        ...CRAFT_TIMING,
       },
     ],
     fetchedAt: 0,
@@ -397,6 +412,7 @@ describe("buildKeepList", () => {
           level: 1,
           requiredItems: [line("wires", 5)],
           productItem: { itemId: "ammo", count: 60 },
+          ...CRAFT_TIMING,
         },
       ],
     });

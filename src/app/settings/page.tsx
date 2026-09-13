@@ -2,8 +2,10 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { CharacterSkills } from '@/components/character-skills';
 import { ConnectLogs } from '@/components/connect-logs';
 import { HideoutLevels } from '@/components/hideout-levels';
+import { TraderLevels } from '@/components/trader-levels';
 import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
 import { isFileSystemAccessSupported } from '@/lib/logs/fs-access-source';
 import { useAppStore } from '@/lib/store/app-store';
@@ -245,10 +247,12 @@ export default function SettingsPage() {
                 <div className='space-y-4'>
                     <LogPanel />
                     <ScreenshotPanel />
+                    <TraderLevels />
                 </div>
                 <div className='space-y-4'>
                     <WipeSettings />
                     <DataPanel />
+                    <CharacterSkills />
                 </div>
             </div>
             {/* Twenty-six rows tall, so it belongs in neither column. */}

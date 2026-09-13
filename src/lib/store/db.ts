@@ -1,5 +1,7 @@
 import { openDB, type IDBPDatabase } from "idb";
 
+import { DEFAULT_FUEL_TANK_ID } from "@/lib/crafts/fuel";
+import type { FleaBasis, InputSource, OutputSource } from "@/lib/crafts/pricing";
 import type { LogEvent } from "@/lib/logs/events";
 import type { CoreBundle, ItemIndex, SellIndex } from "@/lib/tarkovdev/client";
 import type { EconomyBundle } from "@/lib/tarkovdev/economy";
@@ -48,6 +50,44 @@ export interface Settings {
   pollIntervalMs: number;
   /** Whether objective pins are drawn on the raid map. */
   showObjectivePins: boolean;
+
+  // --- character skills -------------------------------------------------------------
+  // Neither is in the logs and neither is in tarkov.dev's data, so both are typed by
+  // hand and both default to zero, which is the reading that flatters nothing.
+
+  /** Crafting, which takes 0.75% off a craft's time per level. */
+  craftingSkill: number;
+  /**
+   * Hideout Management, which deepens the Intelligence Center's listing fee discount.
+   *
+   * Read by the flea tab as well as the crafts table — `fleaMarketFee` has always taken
+   * it and every caller passed zero until there was a field to type it into.
+   */
+  hideoutManagement: number;
+
+  // --- how the crafts table prices things ---------------------------------------------
+  // Modelling choices rather than browsing ones: retyping them every session would make
+  // the table useless, so unlike the filter chips they live here.
+
+  /** Where craft ingredients are bought. */
+  craftInputSource: InputSource;
+  /** Where the product is sold. */
+  craftOutputSource: OutputSource;
+  /** Which flea figure stands in for the price. */
+  craftFleaBasis: FleaBasis;
+  /** Whether a trader offer above your recorded loyalty counts as a price you can pay. */
+  craftRespectLoyalty: boolean;
+  /** Whether generator fuel is charged against a craft's profit. */
+  craftIncludeFuel: boolean;
+  /** Which tank the fuel cost is derived from. */
+  fuelTankId: string;
+  /**
+   * Roubles an hour of generator time costs, overriding the derived figure.
+   *
+   * Null means derive it. The escape hatch exists because the derivation leaves out the
+   * Hideout Management reduction, which is real and which nothing here can model.
+   */
+  fuelRoublesPerHour: number | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -61,6 +101,15 @@ export const DEFAULT_SETTINGS: Settings = {
   gameMode: null,
   pollIntervalMs: 2000,
   showObjectivePins: true,
+  craftingSkill: 0,
+  hideoutManagement: 0,
+  craftInputSource: "cheapest",
+  craftOutputSource: "best",
+  craftFleaBasis: "avg24h",
+  craftRespectLoyalty: true,
+  craftIncludeFuel: true,
+  fuelTankId: DEFAULT_FUEL_TANK_ID,
+  fuelRoublesPerHour: null,
 };
 
 interface StoredValues {

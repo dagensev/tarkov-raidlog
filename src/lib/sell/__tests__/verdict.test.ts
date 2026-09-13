@@ -78,7 +78,7 @@ describe("sellRow", () => {
 
   it("keeps the trader's own currency, because that is what their screen shows", () => {
     const row = sellRow(
-      item("mag", { buyFrom: offer({ traderId: "peacekeeper", price: 26, currency: "USD", priceRUB: 4470 }) }),
+      item("mag", { buyOffers: [offer({ traderId: "peacekeeper", price: 26, currency: "USD", priceRUB: 4470 })] }),
       undefined,
       plain,
     );
@@ -88,7 +88,7 @@ describe("sellRow", () => {
   });
 
   it("carries the loyalty level a buy offer needs", () => {
-    const row = sellRow(item("grip", { buyFrom: offer({ minTraderLevel: 3 }) }), undefined, plain);
+    const row = sellRow(item("grip", { buyOffers: [offer({ minTraderLevel: 3 })] }), undefined, plain);
     expect(row.buy?.minTraderLevel).toBe(3);
   });
 
@@ -125,7 +125,7 @@ describe("the profit columns", () => {
       basePrice: 20_000,
       avg24hPrice: 40_000,
       bestTrader: offer({ priceRUB: 12_000 }),
-      buyFrom: offer({ traderId: "mechanic", priceRUB: 25_000 }),
+      buyOffers: [offer({ traderId: "mechanic", priceRUB: 25_000 })],
       ...overrides,
     });
 
@@ -157,7 +157,7 @@ describe("the profit columns", () => {
   });
 
   it("still compares for an item no trader stocks, since buying is not part of it", () => {
-    const row = sellRow(priced({ buyFrom: null }), undefined, { rates: LIVE_FEE });
+    const row = sellRow(priced({ buyOffers: [] }), undefined, { rates: LIVE_FEE });
     expect(row.fleaVsTrader).toBe(40_000 - row.fleaFee! - 12_000);
   });
 

@@ -4,14 +4,14 @@ import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ItemIcon } from '@/components/item-icon';
+import { PriceStamp } from '@/components/price-stamp';
 import { Chip, EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, TextField, cx } from '@/components/ui';
 import { recordedCount } from '@/lib/sell/hideout-levels';
 import { CATEGORY_CHIPS, SELL_FILTERS, filterRows, nextSort, sortRows, toggle, type SellSortKey, type SellView } from '@/lib/sell/filters';
 import type { KeepReason } from '@/lib/sell/keep-list';
 import type { NamedOffer, SellRow, Verdict } from '@/lib/sell/verdict';
-import { rowWindow } from '@/lib/sell/window';
+import { rowWindow } from '@/lib/table/window';
 import { useAppStore } from '@/lib/store/app-store';
-import { BUNDLE_TTL_MS } from '@/lib/store/db';
 import { useEconomy, useSellIndex, useSellRows } from '@/lib/store/hooks';
 import { itemIconLink, itemPageLink } from '@/lib/tarkovdev/client';
 import { uiScale } from '@/lib/ui-scale';
@@ -181,50 +181,6 @@ function Price({ row }: { row: SellRow }) {
                     fee {roubles(row.fleaFee)}
                 </span>
             ) : null}
-        </span>
-    );
-}
-
-/** Day, month and time. The time alone read as today's when the prices were yesterday's. */
-const stamp = (ms: number): string =>
-    new Date(ms).toLocaleString(undefined, {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-
-/**
- * When these prices were fetched, and when they stop counting as current.
- *
- * The catalogue is cached for a day and only re-fetched when the app next opens and finds
- * it stale, so "refreshes" is where it becomes eligible rather than a promise that
- * something happens at that moment. Saying both is what stops a time on its own reading
- * as this morning when it was in fact yesterday afternoon.
- */
-function PriceStamp({ fetchedAt }: { fetchedAt: number }) {
-    const due = fetchedAt + BUNDLE_TTL_MS;
-    // The clock is read here rather than during render, which would be impure, and it is
-    // re-read on a slow tick so a tab left open overnight stops claiming to be current.
-    const [now, setNow] = useState<number | null>(null);
-    useEffect(() => {
-        const tick = () => setNow(Date.now());
-        tick();
-        const timer = setInterval(tick, 60_000);
-        return () => clearInterval(timer);
-    }, []);
-
-    const stale = now !== null && now > due;
-    return (
-        <span
-            className='data text-[10px] text-muted'
-            title={
-                stale
-                    ? 'Older than a day. Reload the page, or refresh from tarkov.dev in settings.'
-                    : 'Cached for a day. The next time you open this after that, it re-downloads.'
-            }
-        >
-            prices {stamp(fetchedAt)} · {stale ? <span className='text-amber-dim'>refresh due</span> : <>refreshes {stamp(due)}</>}
         </span>
     );
 }

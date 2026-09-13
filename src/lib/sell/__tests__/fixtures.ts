@@ -40,7 +40,7 @@ export function item(id: string, overrides: Partial<SellItem> = {}): SellItem {
     lastLowPrice: null,
     basePrice: null,
     bestTrader: null,
-    buyFrom: null,
+    buyOffers: [],
     types: [],
     categories: [],
     handbook: [],

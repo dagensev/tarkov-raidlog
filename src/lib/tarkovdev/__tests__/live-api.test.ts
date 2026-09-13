@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { FUEL_TANKS } from "@/lib/crafts/fuel";
+import { craftUnlockIndex } from "@/lib/crafts/unlocks";
 import { CATEGORY_CHIPS, matchesChip } from "@/lib/sell/filters";
 import { buildKeepList } from "@/lib/sell/keep-list";
 
@@ -220,6 +222,39 @@ describe.skipIf(!economy || !bundle)("live economy documents", () => {
     expect(economy!.crafts.length).toBeGreaterThan(100);
   });
 
+  it("gives every craft a duration, which is what profit per hour divides by", () => {
+    const timeless = economy!.crafts.filter((craft) => craft.durationSeconds <= 0);
+    expect(timeless.map((craft) => craft.id)).toEqual([]);
+  });
+
+  it("still finds the crafts the calculator badges as locked", () => {
+    // 33 behind a task and one behind a game edition at time of writing. A count of zero
+    // would mean the filter chips silently narrow nothing.
+    expect(economy!.crafts.filter((craft) => craft.taskUnlock).length).toBeGreaterThan(10);
+    expect(economy!.crafts.filter((craft) => craft.gameEditions.length > 0).length).toBeGreaterThan(0);
+  });
+
+  it("keeps a fractional ingredient count unrounded", () => {
+    // Purified water asks for 0.66 of a water filter. Costing the ceilinged count would
+    // overstate that craft by half.
+    const fractional = economy!.crafts.flatMap((craft) =>
+      craft.requiredItems.filter((line) => line.exactCount !== Math.ceil(line.exactCount)),
+    );
+    expect(fractional.length).toBeGreaterThan(0);
+    expect(fractional.every((line) => line.count === Math.ceil(line.exactCount))).toBe(true);
+  });
+
+  it("names a real craft for every task that unlocks one, so a dropped gate can be put back", () => {
+    // tarkov.dev's crafts document drops a quest gate its importer cannot match. The tasks
+    // side is what restores it, and that only works while each unlock names a craft.
+    const unlocks = craftUnlockIndex(bundle!.tasks);
+    expect(unlocks.size).toBeGreaterThan(10);
+    const crafts = new Set(
+      economy!.crafts.map((craft) => `${craft.stationId}:${craft.productItem.itemId}`),
+    );
+    expect([...unlocks.keys()].filter((key) => !crafts.has(key))).toEqual([]);
+  });
+
   it("points every craft at a station the hideout document contains", () => {
     const known = new Set(economy!.stations.map((s) => s.id));
     const orphans = economy!.crafts.filter((c) => !known.has(c.stationId)).map((c) => c.id);
@@ -286,15 +321,15 @@ describe.skipIf(!catalogue)("live item catalogue", () => {
     // Measured at 2399. The column is blank for everything else, which is correct and is
     // why the count matters: a shape change upstream would read the same as a quiet game
     // change, and this says which.
-    const buyable = items().filter((item) => item.buyFrom !== null);
+    const buyable = items().filter((item) => item.buyOffers.length > 0);
     expect(buyable.length).toBeGreaterThan(1800);
-    expect(buyable.every((item) => item.buyFrom!.priceRUB > 0)).toBe(true);
+    expect(buyable.every((item) => item.buyOffers[0].priceRUB > 0)).toBe(true);
   });
 
   it("carries the loyalty level on buy offers and never on sell offers", () => {
     // Traders buy your loot whatever your standing, so a level on that side would be a
     // field the row is not entitled to show.
-    const gated = items().filter((item) => item.buyFrom?.minTraderLevel);
+    const gated = items().filter((item) => item.buyOffers.some((each) => each.minTraderLevel));
     expect(gated.length).toBeGreaterThan(1000);
     expect(items().filter((item) => item.bestTrader?.minTraderLevel)).toEqual([]);
   });
@@ -302,9 +337,26 @@ describe.skipIf(!catalogue)("live item catalogue", () => {
   it("quotes at least one trader in a currency that is not roubles", () => {
     // Peacekeeper. Losing this would silently turn his prices into rouble conversions
     // that do not match the number on his screen.
-    const foreign = items().filter((item) => item.buyFrom && item.buyFrom.currency !== "RUB");
+    const foreign = items().filter((item) => item.buyOffers.some((each) => each.currency !== "RUB"));
     expect(foreign.length).toBeGreaterThan(100);
-    expect(foreign[0].buyFrom!.price).not.toBe(foreign[0].buyFrom!.priceRUB);
+    const quoted = foreign[0].buyOffers.find((each) => each.currency !== "RUB")!;
+    expect(quoted.price).not.toBe(quoted.priceRUB);
+  });
+
+  it("orders every buy offer list cheapest first", () => {
+    // The crafts calculator walks this list to find the cheapest offer within reach of a
+    // loyalty level, and stops at the first match.
+    const unsorted = items().filter((item) =>
+      item.buyOffers.some((each, i) => i > 0 && each.priceRUB < item.buyOffers[i - 1].priceRUB),
+    );
+    expect(unsorted.map((item) => item.id)).toEqual([]);
+  });
+
+  it("carries the capacity of both generator fuel tanks", () => {
+    // The crafts calculator divides a tank's price by this to price an hour of generator
+    // time. Losing it would silently make fuel free.
+    const tanks = FUEL_TANKS.map((tank) => catalogue!.items[tank.itemId]);
+    expect(tanks.map((item) => item?.resourceUnits)).toEqual([100, 60]);
   });
 
   it("carries listing fee rates that are neither missing nor zero", () => {
@@ -342,7 +394,7 @@ describe.skipIf(!catalogue)("live item catalogue", () => {
         "",
         `  items         ${items().length}`,
         `  with a price  ${withFlea.length}`,
-        `  buyable       ${items().filter((item) => item.buyFrom).length}`,
+        `  buyable       ${items().filter((item) => item.buyOffers.length > 0).length}`,
         `  fee rates     ${catalogue!.fleaMarket.sellOfferFeeRate} / ${catalogue!.fleaMarket.sellRequirementFeeRate}`,
         `  chips         ${counts.join(", ")}`,
         "",

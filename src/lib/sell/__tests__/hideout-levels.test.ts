@@ -1,28 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { intelligenceCenterLevel, nextHideoutLevels, recordedCount } from "../hideout-levels";
+import { intelligenceCenterLevel, nextLevels, recordedCount } from "../hideout-levels";
 
-describe("nextHideoutLevels", () => {
+describe("nextLevels", () => {
   it("records a level", () => {
-    expect(nextHideoutLevels({}, "workbench", 3)).toEqual({ workbench: 3 });
+    expect(nextLevels({}, "workbench", 3)).toEqual({ workbench: 3 });
   });
 
   it("overwrites a level already recorded", () => {
-    expect(nextHideoutLevels({ workbench: 1 }, "workbench", 3)).toEqual({ workbench: 3 });
+    expect(nextLevels({ workbench: 1 }, "workbench", 3)).toEqual({ workbench: 3 });
   });
 
   it("removes the key when the level is cleared, rather than writing zero", () => {
     // "Not told" and "not built" want the same upgrade items, but only "not built" stops
     // crafts you cannot run from padding the keep list. They must stay distinguishable.
-    expect(nextHideoutLevels({ workbench: 2 }, "workbench", null)).toEqual({});
+    expect(nextLevels({ workbench: 2 }, "workbench", null)).toEqual({});
   });
 
   it("keeps zero as a real answer", () => {
-    expect(nextHideoutLevels({}, "workbench", 0)).toEqual({ workbench: 0 });
+    expect(nextLevels({}, "workbench", 0)).toEqual({ workbench: 0 });
   });
 
   it("leaves other stations alone", () => {
-    expect(nextHideoutLevels({ lavatory: 1 }, "workbench", 2)).toEqual({
+    expect(nextLevels({ lavatory: 1 }, "workbench", 2)).toEqual({
       lavatory: 1,
       workbench: 2,
     });
@@ -30,17 +30,24 @@ describe("nextHideoutLevels", () => {
 
   it("does not mutate the record it was given", () => {
     const current = { workbench: 1 };
-    nextHideoutLevels(current, "workbench", 3);
+    nextLevels(current, "workbench", 3);
     expect(current).toEqual({ workbench: 1 });
   });
 
   it("never stores a negative or fractional level", () => {
-    expect(nextHideoutLevels({}, "workbench", -2)).toEqual({ workbench: 0 });
-    expect(nextHideoutLevels({}, "workbench", 2.7)).toEqual({ workbench: 2 });
+    expect(nextLevels({}, "workbench", -2)).toEqual({ workbench: 0 });
+    expect(nextLevels({}, "workbench", 2.7)).toEqual({ workbench: 2 });
   });
 
   it("ignores a level that is not a number at all", () => {
-    expect(nextHideoutLevels({}, "workbench", Number.NaN)).toEqual({});
+    expect(nextLevels({}, "workbench", Number.NaN)).toEqual({});
+  });
+
+  it("serves trader loyalty by the same rule, where zero is Fence's lowest standing", () => {
+    // Fence is the one trader whose ladder starts at 0, so zero has to survive as an
+    // answer here too rather than being mistaken for "not told".
+    expect(nextLevels({ prapor: 2 }, "fence", 0)).toEqual({ prapor: 2, fence: 0 });
+    expect(nextLevels({ prapor: 2, fence: 0 }, "prapor", null)).toEqual({ fence: 0 });
   });
 });
 

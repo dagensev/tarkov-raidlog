@@ -27,14 +27,19 @@ import {
   type ItemIndex,
   type SellIndex,
 } from "@/lib/tarkovdev/client";
-import { loadEconomyBundle, type EconomyBundle } from "@/lib/tarkovdev/economy";
+import {
+  ECONOMY_BUNDLE_VERSION,
+  loadEconomyBundle,
+  type EconomyBundle,
+} from "@/lib/tarkovdev/economy";
 import {
   DEFAULT_GAME_MODE,
   gameModeFromSessionMode,
   type GameMode,
 } from "@/lib/tarkovdev/endpoints";
+import { DEFAULT_CRAFT_VIEW, type CraftView } from "@/lib/crafts/filters";
 import { DEFAULT_SELL_VIEW, type SellView } from "@/lib/sell/filters";
-import { nextHideoutLevels } from "@/lib/sell/hideout-levels";
+import { nextLevels } from "@/lib/sell/hideout-levels";
 import type { TaskFilter } from "@/lib/tasks/filters";
 import type { MapFilter } from "@/lib/tasks/map-filter";
 import type { SortMode } from "@/lib/tasks/sort";
@@ -123,6 +128,15 @@ interface AppState {
   /** The sell check's own controls, here for the same reason `taskView` is. */
   sellView: SellView;
 
+  /**
+   * The crafts table's filters and ordering, for the same reason again.
+   *
+   * Only the filters. How the table *prices* a craft — where ingredients are bought, what
+   * fuel costs, your Crafting level — is in `settings` instead, because those are facts
+   * about your account rather than choices about what you are currently looking at.
+   */
+  craftView: CraftView;
+
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
   reconnectLogs: () => Promise<void>;
@@ -131,9 +145,11 @@ interface AppState {
   rescan: () => Promise<void>;
   refreshData: (force?: boolean) => Promise<void>;
   setHideoutLevel: (stationId: string, level: number | null) => Promise<void>;
+  setTraderLevel: (traderId: string, level: number | null) => Promise<void>;
   setMapFilter: (filter: MapFilter) => void;
   setTaskView: (patch: Partial<TaskView>) => void;
   setSellView: (patch: Partial<SellView>) => void;
+  setCraftView: (patch: Partial<CraftView>) => void;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
 }
@@ -242,6 +258,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   mapFilter: null,
   taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
   sellView: DEFAULT_SELL_VIEW,
+  craftView: DEFAULT_CRAFT_VIEW,
 
   async hydrate() {
     const [settings, events, bundle, itemIndex, economy, sellIndex] =
@@ -395,7 +412,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   async setHideoutLevel(stationId, level) {
     const settings = {
       ...get().settings,
-      hideoutLevels: nextHideoutLevels(get().settings.hideoutLevels, stationId, level),
+      hideoutLevels: nextLevels(get().settings.hideoutLevels, stationId, level),
+    };
+    set({ settings });
+    await db.set("settings", settings);
+  },
+
+  /** Its own action for the same reason `setHideoutLevel` is: read the record at click time. */
+  async setTraderLevel(traderId, level) {
+    const settings = {
+      ...get().settings,
+      traderLevels: nextLevels(get().settings.traderLevels, traderId, level),
     };
     set({ settings });
     await db.set("settings", settings);
@@ -411,6 +438,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSellView(patch) {
     set({ sellView: { ...get().sellView, ...patch } });
+  },
+
+  setCraftView(patch) {
+    set({ craftView: { ...get().craftView, ...patch } });
   },
 
   async updateSettings(patch) {
@@ -458,6 +489,7 @@ export function catalogueBehind(
   return (
     state.economy?.mode !== mode ||
     state.sellIndex?.mode !== mode ||
+    state.economy?.version !== ECONOMY_BUNDLE_VERSION ||
     state.sellIndex?.version !== SELL_INDEX_VERSION ||
     isStale(state.economy ?? undefined) ||
     isStale(state.sellIndex ?? undefined)

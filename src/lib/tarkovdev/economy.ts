@@ -39,6 +39,15 @@ export interface ItemRequirement {
    * like 155.1 — and a fractional "keep 155.1" is not something to put on screen.
    */
   count: number;
+  /**
+   * The same figure unrounded, which is what costing a line has to use.
+   *
+   * Purified water asks for 0.66 of a water filter, and charging a whole one overstates
+   * that craft by half. Kept beside `count` rather than replacing it, because the two
+   * questions genuinely differ: a keep list says how many to hold back and cannot say
+   * two thirds, while a profit figure is wrong if it rounds.
+   */
+  exactCount: number;
   foundInRaid: boolean;
   /** Craft only: must be present, handed back afterwards, so never consumed. */
   tool: boolean;
@@ -55,6 +64,8 @@ export interface HideoutStation {
   name: string;
   normalizedName: string;
   levels: HideoutLevel[];
+  /** The station portrait on assets.tarkov.dev, for the crafts table. */
+  imageLink: string | null;
 }
 
 export interface Barter {
@@ -74,24 +85,50 @@ export interface Craft {
   level: number;
   requiredItems: ItemRequirement[];
   productItem: { itemId: string; count: number };
+  /**
+   * How long one run takes, in seconds, before any Crafting skill reduction.
+   *
+   * Zero when the document omits it, which nothing in the live data does. A craft with no
+   * duration has no profit per hour, and the calculator says so rather than dividing by
+   * nothing.
+   */
+  durationSeconds: number;
+  /** Task that has to be finished before the craft appears. Null for most. */
+  taskUnlock: string | null;
+  /** Game editions the craft is exclusive to. Empty for all but one. */
+  gameEditions: string[];
 }
 
 export interface EconomyBundle {
   mode: GameMode;
+  /** Shape of the entries, against `ECONOMY_BUNDLE_VERSION`. Absent on older caches. */
+  version?: number;
   stations: HideoutStation[];
   barters: Barter[];
   crafts: Craft[];
   fetchedAt: number;
 }
 
+/**
+ * Bump whenever the trimming keeps something new.
+ *
+ * The same reasoning as `SELL_INDEX_VERSION`: a cached bundle lives a day, and a field
+ * added today is simply absent from every reader's cache until then. Craft durations were
+ * the case that forced this — a calculator that divides by a missing duration is worse
+ * than one that waits for a refetch.
+ */
+export const ECONOMY_BUNDLE_VERSION = 1;
+
 /** Currency lines are dropped here so nothing downstream has to know money exists. */
 function requirements(raw: readonly RawItemRequirement[] | undefined): ItemRequirement[] {
   const out: ItemRequirement[] = [];
   for (const line of raw ?? []) {
     if (!line?.item || CURRENCY_ITEM_IDS.has(line.item)) continue;
+    const exactCount = typeof line.count === "number" && line.count > 0 ? line.count : 1;
     out.push({
       itemId: line.item,
-      count: Math.max(1, Math.ceil(line.count ?? 1)),
+      count: Math.max(1, Math.ceil(exactCount)),
+      exactCount,
       foundInRaid: line.attributes?.foundInRaid === true,
       tool: line.attributes?.tool === true,
     });
@@ -134,6 +171,7 @@ export async function loadEconomyBundle(
       levels: raw.levels
         .map((level) => ({ level: level.level, requirements: requirements(level.itemRequirements) }))
         .sort((a, b) => a.level - b.level),
+      imageLink: raw.imageLink ?? null,
     });
   }
 
@@ -157,6 +195,10 @@ export async function loadEconomyBundle(
   for (const raw of Object.values(collection<RawCraft>(crafts.data, "crafts"))) {
     if (!raw?.requiredItems) continue;
     const requiredItems = requirements(raw.requiredItems);
+    // A craft that asks nothing of the stash. Exactly one does: the Bitcoin Farm, whose
+    // only input is electricity and whose cycle time depends on how many graphics cards
+    // are slotted — a number the document does not carry. Dropping it here is what keeps
+    // it off the crafts calculator, which has no way to price it honestly.
     if (requiredItems.length === 0) continue;
     trimmedCrafts.push({
       id: raw.id,
@@ -164,11 +206,15 @@ export async function loadEconomyBundle(
       level: raw.level ?? 1,
       requiredItems,
       productItem: product(raw.productItem),
+      durationSeconds: raw.duration ?? 0,
+      taskUnlock: raw.taskUnlock ?? null,
+      gameEditions: raw.gameEditions ?? [],
     });
   }
 
   return {
     mode,
+    version: ECONOMY_BUNDLE_VERSION,
     stations: stations.sort((a, b) => a.name.localeCompare(b.name)),
     barters: trimmedBarters,
     crafts: trimmedCrafts,
