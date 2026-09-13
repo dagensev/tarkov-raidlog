@@ -148,8 +148,8 @@ function ScreenshotPanel() {
                     <span className='data text-bone'>Screenshots</span> folder and pressing the screenshot key in raid puts you on the map.
                 </p>
                 <p className='text-[13px] leading-relaxed text-muted'>
-                    Usually <span className='data'>Documents\Escape from Tarkov\Screenshots</span>. The game only creates it once you have taken your
-                    first screenshot, so take one in raid if it is not there yet.
+                    Usually <span className='data'>Documents\Escape from Tarkov\Screenshots</span>. The game only creates it once you have taken your first
+                    screenshot, so take one in raid if it is not there yet.
                 </p>
                 {status === 'needs-permission' ? (
                     <Button variant='primary' onClick={() => void reconnect()}>
@@ -231,9 +231,7 @@ function DataPanel() {
                 </Button>
                 {error ? <p className='data text-[11px] text-rust'>{error}</p> : null}
                 <p className='text-[12px] leading-relaxed text-muted'>
-                    Cached on this machine. Prices refresh hourly while the app is in view, and
-                    tasks, hideout and crafts daily. There is no prices-only endpoint, so each
-                    price refresh fetches the whole 16.7 MB catalogue again.
+                    Cached on this machine. Prices refresh hourly while the app is in view, and tasks, hideout and crafts daily.
                 </p>
             </div>
         </Panel>

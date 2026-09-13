@@ -8,9 +8,9 @@
 
 import { NO_FEE } from "@/lib/sell/__tests__/fixtures";
 import type { FleaMarketRates } from "@/lib/tarkovdev/client";
-import type { Craft, HideoutStation, ItemRequirement } from "@/lib/tarkovdev/economy";
+import type { Barter, Craft, HideoutStation, ItemRequirement } from "@/lib/tarkovdev/economy";
 
-import type { MarketContext } from "../pricing";
+import { MARKET_KINDS, ROUTE_KINDS, type MarketContext, type RouteKind } from "../pricing";
 
 export { LIVE_FEE, NO_FEE, index, item, offer } from "@/lib/sell/__tests__/fixtures";
 
@@ -41,6 +41,25 @@ export function craft(overrides: Partial<Craft> = {}): Craft {
     ...overrides,
   };
 }
+
+export function barter(overrides: Partial<Barter> = {}): Barter {
+  return {
+    id: "b1",
+    traderId: "prapor",
+    taskUnlock: null,
+    minTraderLevel: null,
+    buyLimit: null,
+    requiredItems: [line("nuts", 1)],
+    offeredItem: { itemId: "sugar", count: 1 },
+    ...overrides,
+  };
+}
+
+/** The route sets a test picks from. Only the markets is what the table did before routes. */
+export const MARKETS: ReadonlySet<RouteKind> = new Set(MARKET_KINDS);
+export const EVERY_ROUTE: ReadonlySet<RouteKind> = new Set(ROUTE_KINDS);
+export const FLEA_ONLY: ReadonlySet<RouteKind> = new Set(["flea"]);
+export const TRADER_ONLY: ReadonlySet<RouteKind> = new Set(["trader"]);
 
 export function station(
   id: string,

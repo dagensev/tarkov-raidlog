@@ -74,6 +74,11 @@ export interface Barter {
   /** Task that unlocks the offer, or null. 56 of 806 have one. */
   taskUnlock: string | null;
   minTraderLevel: number | null;
+  /**
+   * How many times one restock lets you take it, or null for no limit. Read by the crafts
+   * calculator, which prices a barter per trade and has to say when that trade is rationed.
+   */
+  buyLimit: number | null;
   requiredItems: ItemRequirement[];
   offeredItem: { itemId: string; count: number };
 }
@@ -117,7 +122,7 @@ export interface EconomyBundle {
  * the case that forced this — a calculator that divides by a missing duration is worse
  * than one that waits for a refetch.
  */
-export const ECONOMY_BUNDLE_VERSION = 1;
+export const ECONOMY_BUNDLE_VERSION = 2;
 
 /** Currency lines are dropped here so nothing downstream has to know money exists. */
 function requirements(raw: readonly RawItemRequirement[] | undefined): ItemRequirement[] {
@@ -186,6 +191,7 @@ export async function loadEconomyBundle(
       traderId: raw.trader,
       taskUnlock: raw.taskUnlock ?? null,
       minTraderLevel: raw.minTraderLevel ?? null,
+      buyLimit: typeof raw.buyLimit === "number" && raw.buyLimit > 0 ? raw.buyLimit : null,
       requiredItems,
       offeredItem: product(raw.offeredItem),
     });

@@ -8,14 +8,12 @@ import {
   sortCraftRows,
   type CraftView,
 } from "../filters";
-import { craft, index, item, line, market, station } from "./fixtures";
+import { routeGraph } from "../routes";
+import { MARKETS, craft, index, item, line, market, station } from "./fixtures";
 
 const WORKBENCH = station("workbench", { name: "Workbench" });
 const LAVATORY = station("lavatory", { name: "Lavatory" });
-const STATIONS = new Map([
-  [WORKBENCH.id, WORKBENCH],
-  [LAVATORY.id, LAVATORY],
-]);
+const GRAPH = routeGraph({ stations: [WORKBENCH, LAVATORY], barters: [], crafts: [] });
 
 const CATALOGUE = index([
   item("sugar", { name: "Pack of sugar", avg24hPrice: 20_000 }),
@@ -25,10 +23,11 @@ const CATALOGUE = index([
 ]);
 
 function rowFor(overrides: Parameters<typeof craft>[0] = {}): CraftRow {
-  return craftRow(craft(overrides), STATIONS, CATALOGUE, {
+  return craftRow(craft(overrides), GRAPH, CATALOGUE, {
     market: market(),
-    inputSource: "cheapest",
-    outputSource: "best",
+    buyFrom: MARKETS,
+    sellTo: MARKETS,
+    traderLevels: {},
     craftingSkill: 0,
     fuelRoublesPerHour: null,
     hideoutLevels: { workbench: 2 },

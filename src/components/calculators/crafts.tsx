@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { ItemIcon } from '@/components/item-icon';
 import { PriceStamp } from '@/components/price-stamp';
 import { Chip, EmptyNote, Label, Panel, PanelHeader, Pill, TextField, cx } from '@/components/ui';
-import type { CraftLine, CraftRow } from '@/lib/crafts/craft-row';
+import type { CraftRow } from '@/lib/crafts/craft-row';
 import {
     CRAFT_LEVELS,
     filterCraftRows,
@@ -14,14 +14,17 @@ import {
     type CraftSortKey,
     type CraftView,
 } from '@/lib/crafts/filters';
+import { exceedsRestock } from '@/lib/crafts/plan';
+import type { Acquisition, Disposal } from '@/lib/crafts/routes';
 import { useAppStore } from '@/lib/store/app-store';
 import { useCraftRows, useCraftStations, useEconomy, useSellIndex, useTasks } from '@/lib/store/hooks';
 import { rowWindow } from '@/lib/table/window';
-import { itemIconLink, itemPageLink, type SellItem } from '@/lib/tarkovdev/client';
+import { itemIconLink, type SellItem } from '@/lib/tarkovdev/client';
 import { uiScale } from '@/lib/ui-scale';
 
+import { Breakdown, TaskNames, countText } from './craft-breakdown';
 import { CraftSettings } from './craft-settings';
-import { FIGURE, Figure, Money, duration, roubles } from './craft-format';
+import { FIGURE, Money, duration } from './craft-format';
 
 /**
  * The height of one collapsed row, in pixels.
@@ -75,14 +78,14 @@ const COLUMNS: ReadonlyArray<{
     {
         key: 'time',
         label: 'Craft time',
-        title: 'One run at your Crafting skill. Fastest first.',
+        title: 'One run at your Crafting skill, plus any crafts its plan runs to make an ingredient or take the product. Fastest first.',
         width: '11%',
         centred: true,
     },
     {
         key: 'profit',
         label: 'Profit',
-        title: 'What one run clears: the product sold, less the ingredients, less the fuel',
+        title: 'What one run clears: the product sold or traded on, less the ingredients however they were got, less the fuel',
         width: '14%',
         centred: true,
     },
@@ -132,6 +135,33 @@ function HeaderCell({
     );
 }
 
+/** The barter or craft an item in the process cell goes through, for its corner tag. */
+interface Trade {
+    kind: 'barter' | 'craft';
+    where: string;
+    locked: boolean;
+    /** Whether the item is got by the trade, or got rid of by it. */
+    side: 'in' | 'out';
+}
+
+const tradeIn = (unit: Acquisition | null): Trade | null =>
+    unit?.step ? { kind: unit.step.kind, where: unit.step.where, locked: unit.locked, side: 'in' } : null;
+
+const tradeOut = (sale: Disposal | null): Trade | null =>
+    sale?.step ? { kind: sale.step.kind, where: sale.step.where, locked: sale.locked, side: 'out' } : null;
+
+function tradeTitle(trade: Trade): string {
+    const how =
+        trade.side === 'in'
+            ? trade.kind === 'barter'
+                ? `bartered for at ${trade.where}`
+                : `crafted at the ${trade.where}`
+            : trade.kind === 'barter'
+              ? `traded on at ${trade.where}`
+              : `crafted on at the ${trade.where}`;
+    return trade.locked ? `${how}, through a route you cannot take yet` : how;
+}
+
 /**
  * One item in the process cell: its name, its icon in a stash-cell box, and how many.
  *
@@ -144,27 +174,45 @@ function ProcessItem({
     fallbackName,
     count,
     tool,
+    trade,
 }: {
     item: SellItem | null;
     fallbackName: string;
     count: number;
     tool?: boolean;
+    /** The barter or craft this item goes through, when its route is one. */
+    trade?: Trade | null;
 }) {
     const name = item?.name ?? fallbackName;
     // A tool is shown at ×1 whatever the document says, because you need one and hand it
     // back — "×3 silicone tube" would read as three tubes consumed.
     const quantity = tool ? 1 : count;
+    const title = tool ? `${name} (tool, handed back)` : trade ? `${name}, ${tradeTitle(trade)}` : name;
 
     return (
-        <span className='flex w-14 shrink-0 flex-col items-center gap-1' title={tool ? `${name} (tool, handed back)` : name}>
+        <span className='flex w-14 shrink-0 flex-col items-center gap-1' title={title}>
             <span className='w-full truncate text-center text-[10px] text-bone-dim'>{name}</span>
             <span
                 className={cx(
-                    'flex size-11 items-center justify-center border bg-ground-2',
+                    'relative flex size-11 items-center justify-center border bg-ground-2',
                     tool ? 'border-steel/50' : 'border-line',
                 )}
             >
                 {item ? <ItemIcon src={itemIconLink(item)} size={38} /> : null}
+                {/* A corner tag rather than a line of text, since the column has no room for
+                    one: the route is the breakdown's to explain, and the row only has to say
+                    that this item is not simply bought or sold. */}
+                {trade ? (
+                    <span
+                        aria-hidden
+                        className={cx(
+                            'stencil absolute -top-1.5 -right-1.5 border bg-panel px-[3px] text-[8px] leading-[12px]',
+                            trade.locked ? 'border-rust/60 text-rust' : 'border-amber/50 text-amber',
+                        )}
+                    >
+                        {trade.kind === 'barter' ? 'B' : 'C'}
+                    </span>
+                ) : null}
             </span>
             <span className={cx(FIGURE, 'text-[10px]', tool ? 'text-steel' : 'text-muted')}>
                 {tool ? 'tool' : `×${quantity % 1 === 0 ? quantity : quantity.toFixed(2)}`}
@@ -184,150 +232,18 @@ function Process({ row }: { row: CraftRow }) {
                     fallbackName={line.itemId}
                     count={line.count}
                     tool={line.tool}
+                    trade={tradeIn(line.unit)}
                 />
             ))}
             <span aria-hidden className='data shrink-0 px-1 text-[16px] text-line-bright'>
                 ❯
             </span>
-            <ProcessItem item={row.product} fallbackName={row.productName} count={row.productCount} />
-        </div>
-    );
-}
-
-/** What one line of the breakdown says: an item, a unit price, where from, a line cost. */
-function BreakdownLine({ line }: { line: CraftLine }) {
-    return (
-        <li className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
-            <span className='min-w-48 text-[12px] text-bone-dim'>{line.item?.name ?? line.itemId}</span>
-            <span className={cx(FIGURE, 'text-[11px] text-muted')}>
-                ×{line.count % 1 === 0 ? line.count : line.count.toFixed(2)}
-            </span>
-            {line.tool ? (
-                <span className='data text-[10px] text-steel'>tool, handed back</span>
-            ) : line.unit ? (
-                <>
-                    <span className={cx(FIGURE, 'text-[11px] text-bone')}>{roubles(line.unit.priceRUB)} each</span>
-                    <span className='data text-[10px] text-muted'>
-                        {line.unit.from === 'flea' ? 'flea' : (line.unit.offer?.traderName ?? 'trader')}
-                        {line.unit.offer?.minTraderLevel ? ` ${line.unit.offer.minTraderLevel}` : ''}
-                        {line.unit.offer?.taskUnlock ? ' · task' : ''}
-                    </span>
-                </>
-            ) : (
-                <span className='data text-[10px] text-rust'>no price</span>
-            )}
-            <span className={cx(FIGURE, 'ml-auto text-[12px]', line.cost === null ? 'text-rust' : 'text-bone')}>
-                {line.cost === null ? '—' : roubles(line.cost)}
-            </span>
-        </li>
-    );
-}
-
-/**
- * The product, laid out the way an ingredient is: what one sells for and where, then the lot.
- *
- * A craft that yields five reads very differently at 16,000 each than at 80,000 for the lot,
- * and the per-item figure is the one to check against the flea before trusting the row. The
- * fee is per item too, since that is how the flea charges it.
- */
-function ProductLine({ row }: { row: CraftRow }) {
-    const revenue = row.unitRevenue;
-
-    return (
-        <li className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line/70 pt-2'>
-            <span className='min-w-48 text-[12px] text-bone'>{row.productName}</span>
-            <span className={cx(FIGURE, 'text-[11px] text-muted')}>×{row.productCount}</span>
-            {revenue ? (
-                <>
-                    <span className={cx(FIGURE, 'text-[11px] text-bone')}>{roubles(revenue.priceRUB)} each</span>
-                    <span className='data text-[10px] text-muted'>
-                        {revenue.to === 'flea' ? 'flea' : (revenue.offer?.traderName ?? 'trader')}
-                        {revenue.fee > 0 ? ` · fee ${roubles(revenue.fee)} each` : ''}
-                    </span>
-                </>
-            ) : (
-                <span className='data text-[10px] text-rust'>no price</span>
-            )}
-            <span className={cx(FIGURE, 'ml-auto text-[12px]', revenue === null ? 'text-rust' : 'text-bone')}>
-                {revenue === null ? '—' : roubles(revenue.priceRUB * row.productCount)}
-            </span>
-        </li>
-    );
-}
-
-/**
- * The working behind one row.
- *
- * Every figure the Profit column is made of, in the order they combine, so a number that
- * looks wrong can be traced to the ingredient or the fee that made it wrong rather than
- * merely disbelieved.
- */
-function Breakdown({ row }: { row: CraftRow }) {
-    const revenue = row.unitRevenue;
-
-    return (
-        <div className='space-y-3 border-l border-line-bright pl-4'>
-            <ul className='space-y-1.5'>
-                {row.lines.map((line, i) => (
-                    <BreakdownLine key={`${line.itemId}-${i}`} line={line} />
-                ))}
-                {row.fuelCost > 0 ? (
-                    <li className='flex flex-wrap items-baseline gap-x-3'>
-                        <span className='min-w-48 text-[12px] text-bone-dim'>Generator fuel</span>
-                        <span className='data text-[10px] text-muted'>over {duration(row.seconds)}</span>
-                        <span className={cx(FIGURE, 'ml-auto text-[12px] text-bone')}>{roubles(row.fuelCost)}</span>
-                    </li>
-                ) : !row.usesPower ? (
-                    // Said rather than left out, so a missing fuel line is not mistaken for
-                    // the fuel charge having been switched off.
-                    <li className='flex flex-wrap items-baseline gap-x-3'>
-                        <span className='min-w-48 text-[12px] text-bone-dim'>No generator fuel</span>
-                        <span className='data text-[10px] text-muted'>the {row.stationName} runs without power</span>
-                    </li>
-                ) : null}
-                <ProductLine row={row} />
-            </ul>
-
-            {/* Read left to right, the four figures are the sum: what it sells for, less
-                the fee on selling it, less everything above, leaves the profit. Which is
-                why the asking price is shown gross here — a net figure beside a fee reads
-                as though the fee were still to come off. */}
-            <div className='flex flex-wrap items-end gap-x-8 gap-y-3 border-t border-line/70 pt-3'>
-                <Figure label={`Sells ${revenue ? (revenue.to === 'flea' ? 'on the flea' : `to ${revenue.offer?.traderName ?? 'a trader'}`) : ''}`}>
-                    <span className={cx(FIGURE, 'text-[13px]', revenue === null ? 'text-rust' : 'text-bone')}>
-                        {revenue === null ? 'unsellable' : roubles(revenue.priceRUB * row.productCount)}
-                    </span>
-                </Figure>
-
-                {revenue && revenue.fee > 0 ? (
-                    <Figure label='Listing fee'>
-                        <span className={cx(FIGURE, 'text-[13px] text-rust')}>
-                            −{roubles(revenue.fee * row.productCount)}
-                        </span>
-                    </Figure>
-                ) : null}
-
-                <Figure label={row.fuelCost > 0 ? 'Inputs and fuel' : 'Inputs'}>
-                    <span className={cx(FIGURE, 'text-[13px]', row.inputCost === null ? 'text-rust' : 'text-bone')}>
-                        {row.inputCost === null ? 'unpriceable' : `−${roubles(row.inputCost + row.fuelCost)}`}
-                    </span>
-                </Figure>
-
-                <Figure label='Profit'>
-                    <Money value={row.profit} className='text-[13px]' />
-                </Figure>
-
-                {row.product ? (
-                    <a
-                        href={row.product.wikiLink ?? itemPageLink(row.product)}
-                        target='_blank'
-                        rel='noreferrer'
-                        className='data ml-auto text-[10px] text-steel underline underline-offset-2 transition-colors hover:text-amber'
-                    >
-                        {row.product.wikiLink ? 'Wiki' : 'tarkov.dev'}
-                    </a>
-                ) : null}
-            </div>
+            <ProcessItem
+                item={row.product}
+                fallbackName={row.productName}
+                count={row.productCount}
+                trade={tradeOut(row.unitRevenue)}
+            />
         </div>
     );
 }
@@ -353,6 +269,9 @@ function Row({
 }) {
     // The document's own time, worth showing only when the skill has moved it.
     const reduced = Math.round(row.seconds) !== Math.round(row.baseSeconds);
+    // On the row as well as in the plan, since a rationed barter changes whether the figure
+    // is one you can take home tonight, which is worth knowing before opening anything.
+    const rationed = row.plan.steps.find((step) => exceedsRestock(step, row.plan.batch));
 
     return (
         <tr
@@ -396,14 +315,37 @@ function Row({
                                 </span>
                             </Pill>
                         ) : null}
+                        {row.routeLocked ? (
+                            <Pill tone='rust'>
+                                <span title='The plan behind these figures goes through a barter or craft you cannot do yet. Open the row to see which.'>
+                                    route
+                                </span>
+                            </Pill>
+                        ) : null}
+                        {rationed ? (
+                            <Pill tone='amber'>
+                                <span
+                                    title={`Each run of this craft needs ${countText(rationed.runs / row.plan.batch)} trades with ${rationed.where}, which allows ${rationed.limit} a restock. The figures assume you can make them all.`}
+                                >
+                                    restock
+                                </span>
+                            </Pill>
+                        ) : null}
                     </span>
                 </div>
             </td>
 
             <td className='px-3 py-[10px]'>
                 <div className={cx(CELL, 'flex-col items-center justify-center text-center')}>
-                    <span className={cx(FIGURE, 'text-[12px] text-bone')}>{duration(row.seconds)}</span>
-                    {reduced ? (
+                    <span className={cx(FIGURE, 'text-[12px] text-bone')}>{duration(row.totalSeconds)}</span>
+                    {row.chainSeconds > 0 ? (
+                        <span
+                            className={cx(FIGURE, 'text-[10px] text-amber-dim')}
+                            title={`${duration(row.seconds)} for this craft, and ${duration(row.chainSeconds)} of the crafts its plan runs to make an ingredient or take the product`}
+                        >
+                            {duration(row.chainSeconds)} chain
+                        </span>
+                    ) : reduced ? (
                         <span className={cx(FIGURE, 'text-[10px] text-muted')} title='Before your Crafting skill'>
                             was {duration(row.baseSeconds)}
                         </span>
@@ -647,7 +589,9 @@ export function CraftsCalculator() {
                                             {open ? (
                                                 <tr ref={measureOpen} className='bg-panel-2/60'>
                                                     <td colSpan={COLUMNS.length} className='px-4 pt-3 pb-3'>
-                                                        <Breakdown row={row} />
+                                                        <TaskNames.Provider value={taskNames}>
+                                                            <Breakdown row={row} />
+                                                        </TaskNames.Provider>
                                                     </td>
                                                 </tr>
                                             ) : null}

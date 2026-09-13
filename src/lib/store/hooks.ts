@@ -378,8 +378,10 @@ export function useCraftRows(): CraftRow[] {
 
   const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
   const traderLevels = useAppStore((s) => s.settings.traderLevels);
-  const inputSource = useAppStore((s) => s.settings.craftInputSource);
-  const outputSource = useAppStore((s) => s.settings.craftOutputSource);
+  const buyFromList = useAppStore((s) => s.settings.craftBuyFrom);
+  const sellToList = useAppStore((s) => s.settings.craftSellTo);
+  const buyFrom = useMemo(() => new Set(buyFromList), [buyFromList]);
+  const sellTo = useMemo(() => new Set(sellToList), [sellToList]);
   const basis = useAppStore((s) => s.settings.craftFleaBasis);
   const respectLoyalty = useAppStore((s) => s.settings.craftRespectLoyalty);
   const includeFuel = useAppStore((s) => s.settings.craftIncludeFuel);
@@ -402,13 +404,14 @@ export function useCraftRows(): CraftRow[] {
 
   return useMemo(() => {
     if (!economy || !index) return EMPTY_CRAFT_ROWS;
-    return craftRows(economy.crafts, economy.stations, index, {
+    return craftRows(economy, index, {
       market,
-      inputSource,
-      outputSource,
+      buyFrom,
+      sellTo,
       craftingSkill,
       fuelRoublesPerHour: includeFuel ? fuel.roublesPerHour : null,
       hideoutLevels,
+      traderLevels,
       craftUnlocks,
       taskStates: knownTaskStates,
     });
@@ -418,8 +421,9 @@ export function useCraftRows(): CraftRow[] {
     economy,
     index,
     market,
-    inputSource,
-    outputSource,
+    buyFrom,
+    sellTo,
+    traderLevels,
     craftingSkill,
     includeFuel,
     fuel.roublesPerHour,

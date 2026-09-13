@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useAppStore } from "@/lib/store/app-store";
-import { Panel, PanelHeader, TextField } from "./ui";
+import { useAppStore } from '@/lib/store/app-store';
+import { Panel, PanelHeader, TextField } from './ui';
 
 /**
  * The two character skills that change a number on another page.
@@ -19,58 +19,52 @@ import { Panel, PanelHeader, TextField } from "./ui";
 const MAX_SKILL = 51;
 
 const SKILLS = [
-  {
-    key: "craftingSkill",
-    label: "Crafting",
-    hint: "Takes 0.75% off every craft's time per level, reaching 37.5% at Elite.",
-  },
-  {
-    key: "hideoutManagement",
-    label: "Hideout Management",
-    hint: "Deepens the Intelligence Center 3 discount on flea listing fees.",
-  },
+    {
+        key: 'craftingSkill',
+        label: 'Crafting',
+        hint: "Takes 0.75% off every craft's time per level, reaching 37.5% at Elite.",
+    },
+    {
+        key: 'hideoutManagement',
+        label: 'Hideout Management',
+        hint: 'Deepens the Intelligence Center 3 discount on flea listing fees.',
+    },
 ] as const;
 
 export function CharacterSkills() {
-  const settings = useAppStore((s) => s.settings);
-  const update = useAppStore((s) => s.updateSettings);
+    const settings = useAppStore((s) => s.settings);
+    const update = useAppStore((s) => s.updateSettings);
 
-  return (
-    <Panel className="rise" style={{ animationDelay: "150ms" }}>
-      <PanelHeader title="Character skills" />
-      <div className="space-y-3 px-4 py-4">
-        <p className="text-[12px] leading-relaxed text-muted">
-          Neither is in the logs, so both start at zero. Leaving them there costs you
-          nothing but a slightly pessimistic craft time and a slightly steep fee.
-        </p>
+    return (
+        <Panel className='rise' style={{ animationDelay: '150ms' }}>
+            <PanelHeader title='Character skills' />
+            <div className='space-y-3 px-4 py-4'>
+                <p className='text-[12px] leading-relaxed text-muted'>Factors into craft time and flea market fee.</p>
 
-        <ul className="divide-y divide-line">
-          {SKILLS.map((skill) => (
-            <li key={skill.key} className="flex flex-wrap items-center gap-3 py-2.5">
-              <span className="min-w-40 text-[13px] text-bone">{skill.label}</span>
-              <TextField
-                type="number"
-                min={0}
-                max={MAX_SKILL}
-                value={settings[skill.key]}
-                onChange={(e) =>
-                  void update({
-                    [skill.key]: Math.min(
-                      MAX_SKILL,
-                      Math.max(0, Number(e.target.value) || 0),
-                    ),
-                  })
-                }
-                aria-label={`${skill.label} level`}
-                className="w-20"
-              />
-              {/* Plain rather than a stencil Label: these are sentences, and the stencil
+                <ul className='divide-y divide-line'>
+                    {SKILLS.map((skill) => (
+                        <li key={skill.key} className='flex flex-wrap items-center gap-3 py-2.5'>
+                            <span className='min-w-40 text-[13px] text-bone'>{skill.label}</span>
+                            <TextField
+                                type='number'
+                                min={0}
+                                max={MAX_SKILL}
+                                value={settings[skill.key]}
+                                onChange={(e) =>
+                                    void update({
+                                        [skill.key]: Math.min(MAX_SKILL, Math.max(0, Number(e.target.value) || 0)),
+                                    })
+                                }
+                                aria-label={`${skill.label} level`}
+                                className='w-20'
+                            />
+                            {/* Plain rather than a stencil Label: these are sentences, and the stencil
                   face uppercases, which turns each of them into a shout. */}
-              <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted">{skill.hint}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </Panel>
-  );
+                            <span className='min-w-0 flex-1 text-[11px] leading-relaxed text-muted'>{skill.hint}</span>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        </Panel>
+    );
 }

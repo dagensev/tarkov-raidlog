@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fleaMarketFee } from "@/lib/sell/fee";
 
 import { buyPrice, fleaPrice, reachableOffer, sellPrice } from "../pricing";
-import { LIVE_FEE, item, market, offer } from "./fixtures";
+import { FLEA_ONLY, LIVE_FEE, MARKETS, TRADER_ONLY, item, market, offer } from "./fixtures";
 
 describe("fleaPrice", () => {
   it("takes the 24h average on the average basis, and the last low on the other", () => {
@@ -61,7 +61,7 @@ describe("buyPrice", () => {
   });
 
   it("takes whichever of the two is cheaper", () => {
-    expect(buyPrice(sugar, "cheapest", market())).toMatchObject({ from: "trader", priceRUB: 11_000 });
+    expect(buyPrice(sugar, MARKETS, market())).toMatchObject({ from: "trader", priceRUB: 11_000 });
   });
 
   it("takes the flea when the reachable trader offer costs more", () => {
@@ -69,30 +69,30 @@ describe("buyPrice", () => {
       avg24hPrice: 9_000,
       buyOffers: [offer({ priceRUB: 11_000 })],
     });
-    expect(buyPrice(dear, "cheapest", market())).toMatchObject({ from: "flea", priceRUB: 9_000 });
+    expect(buyPrice(dear, MARKETS, market())).toMatchObject({ from: "flea", priceRUB: 9_000 });
   });
 
   it("falls back to the flea when loyalty puts every trader offer out of reach", () => {
     const context = market({ traderLevels: { prapor: 1 } });
-    expect(buyPrice(sugar, "cheapest", context)).toMatchObject({ from: "flea", priceRUB: 15_000 });
+    expect(buyPrice(sugar, MARKETS, context)).toMatchObject({ from: "flea", priceRUB: 15_000 });
   });
 
   it("ignores traders entirely when told to", () => {
-    expect(buyPrice(sugar, "flea", market())).toMatchObject({ from: "flea", priceRUB: 15_000 });
+    expect(buyPrice(sugar, FLEA_ONLY, market())).toMatchObject({ from: "flea", priceRUB: 15_000 });
   });
 
   it("ignores the flea entirely when told to", () => {
-    expect(buyPrice(sugar, "trader", market())).toMatchObject({ from: "trader", priceRUB: 11_000 });
+    expect(buyPrice(sugar, TRADER_ONLY, market())).toMatchObject({ from: "trader", priceRUB: 11_000 });
   });
 
   it("names the trader an offer came from", () => {
     const context = market({ traderNames: new Map([["prapor", "Prapor"]]) });
-    expect(buyPrice(sugar, "trader", context)?.offer?.traderName).toBe("Prapor");
+    expect(buyPrice(sugar, TRADER_ONLY, context)?.offer?.traderName).toBe("Prapor");
   });
 
   it("reports nothing when neither side has a price", () => {
-    expect(buyPrice(item("quest-item"), "cheapest", market())).toBeNull();
-    expect(buyPrice(sugar, "trader", market({ traderLevels: {} }))).toBeNull();
+    expect(buyPrice(item("quest-item"), MARKETS, market())).toBeNull();
+    expect(buyPrice(sugar, TRADER_ONLY, market({ traderLevels: {} }))).toBeNull();
   });
 });
 
@@ -105,13 +105,13 @@ describe("sellPrice", () => {
 
   it("nets the listing fee off the flea side", () => {
     const context = market({ rates: LIVE_FEE });
-    const sold = sellPrice(moonshine, "flea", context)!;
+    const sold = sellPrice(moonshine, FLEA_ONLY, context)!;
     expect(sold.fee).toBe(fleaMarketFee(30_000, 130_000, LIVE_FEE, {}));
     expect(sold.net).toBe(130_000 - sold.fee);
   });
 
   it("charges nothing to vendor, since a trader takes no cut", () => {
-    const sold = sellPrice(moonshine, "trader", market({ rates: LIVE_FEE }))!;
+    const sold = sellPrice(moonshine, TRADER_ONLY, market({ rates: LIVE_FEE }))!;
     expect(sold).toMatchObject({ to: "trader", fee: 0, net: 40_000 });
   });
 
@@ -123,27 +123,27 @@ describe("sellPrice", () => {
       avg24hPrice: 130_000,
       bestTrader: offer({ priceRUB: 40_000 }),
     });
-    expect(sellPrice(steep, "best", market({ rates: LIVE_FEE }))?.to).toBe("trader");
-    expect(sellPrice(moonshine, "best", market({ rates: LIVE_FEE }))?.to).toBe("flea");
+    expect(sellPrice(steep, MARKETS, market({ rates: LIVE_FEE }))?.to).toBe("trader");
+    expect(sellPrice(moonshine, MARKETS, market({ rates: LIVE_FEE }))?.to).toBe("flea");
   });
 
   it("falls back to the side that exists when the other does not", () => {
     const banned = item("bitcoin", { noFlea: true, bestTrader: offer({ priceRUB: 400_000 }) });
-    expect(sellPrice(banned, "best", market())?.to).toBe("trader");
+    expect(sellPrice(banned, MARKETS, market())?.to).toBe("trader");
 
     const unvendorable = item("lamp", { avg24hPrice: 5_000 });
-    expect(sellPrice(unvendorable, "best", market())?.to).toBe("flea");
+    expect(sellPrice(unvendorable, MARKETS, market())?.to).toBe("flea");
   });
 
   it("reports nothing for an item with neither a listing nor a buyer", () => {
-    expect(sellPrice(item("quest-item"), "best", market())).toBeNull();
+    expect(sellPrice(item("quest-item"), MARKETS, market())).toBeNull();
   });
 
   it("lets the Intelligence Center discount reach the fee", () => {
-    const plain = sellPrice(moonshine, "flea", market({ rates: LIVE_FEE }))!;
+    const plain = sellPrice(moonshine, FLEA_ONLY, market({ rates: LIVE_FEE }))!;
     const discounted = sellPrice(
       moonshine,
-      "flea",
+      FLEA_ONLY,
       market({ rates: LIVE_FEE, intelligenceCenter: 3, hideoutManagement: 50 }),
     )!;
     expect(discounted.fee).toBeLessThan(plain.fee);

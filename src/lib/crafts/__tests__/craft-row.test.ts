@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { CRAFTING_TIME_PER_LEVEL, craftRow, craftRows, craftSeconds } from "../craft-row";
 import type { CraftRowOptions } from "../craft-row";
-import { craft, index, item, line, market, offer, station } from "./fixtures";
+import { routeGraph } from "../routes";
+import { MARKETS, craft, index, item, line, market, offer, station } from "./fixtures";
 
 const WORKBENCH = station("workbench");
-const STATIONS = new Map([[WORKBENCH.id, WORKBENCH]]);
+const GRAPH = routeGraph({ stations: [WORKBENCH], barters: [], crafts: [] });
 
 const CATALOGUE = index([
   item("sugar", { avg24hPrice: 20_000 }),
@@ -17,18 +18,19 @@ const CATALOGUE = index([
 
 const options = (overrides: Partial<CraftRowOptions> = {}): CraftRowOptions => ({
   market: market(),
-  inputSource: "cheapest",
-  outputSource: "best",
+  buyFrom: MARKETS,
+  sellTo: MARKETS,
   craftingSkill: 0,
   fuelRoublesPerHour: null,
   hideoutLevels: {},
+  traderLevels: {},
   craftUnlocks: new Map(),
   taskStates: null,
   ...overrides,
 });
 
 const row = (over: Parameters<typeof craft>[0] = {}, opts: Partial<CraftRowOptions> = {}) =>
-  craftRow(craft(over), STATIONS, CATALOGUE, options(opts));
+  craftRow(craft(over), GRAPH, CATALOGUE, options(opts));
 
 describe("craftSeconds", () => {
   it("takes 0.75% off per level of Crafting", () => {
@@ -170,8 +172,7 @@ describe("the task gate, read from the logs", () => {
 describe("craftRows", () => {
   it("builds one row per craft", () => {
     const rows = craftRows(
-      [craft({ id: "a" }), craft({ id: "b" })],
-      [WORKBENCH],
+      { crafts: [craft({ id: "a" }), craft({ id: "b" })], stations: [WORKBENCH], barters: [] },
       CATALOGUE,
       options(),
     );
@@ -181,10 +182,7 @@ describe("craftRows", () => {
 
 describe("stations that run without power", () => {
   const LAVATORY = station("lavatory");
-  const both = new Map([
-    [WORKBENCH.id, WORKBENCH],
-    [LAVATORY.id, LAVATORY],
-  ]);
+  const both = routeGraph({ stations: [WORKBENCH, LAVATORY], barters: [], crafts: [] });
   const priced = (stationId: string) =>
     craftRow(
       craft({ stationId, requiredItems: [line("sugar", 2)] }),

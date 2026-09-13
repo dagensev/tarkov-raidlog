@@ -1,7 +1,7 @@
 import { openDB, type IDBPDatabase } from "idb";
 
 import { DEFAULT_FUEL_TANK_ID } from "@/lib/crafts/fuel";
-import type { FleaBasis, InputSource, OutputSource } from "@/lib/crafts/pricing";
+import { MARKET_KINDS, type FleaBasis, type RouteKind } from "@/lib/crafts/pricing";
 import type { LogEvent } from "@/lib/logs/events";
 import type { CoreBundle, ItemIndex, SellIndex } from "@/lib/tarkovdev/client";
 import type { EconomyBundle } from "@/lib/tarkovdev/economy";
@@ -69,10 +69,13 @@ export interface Settings {
   // Modelling choices rather than browsing ones: retyping them every session would make
   // the table useless, so unlike the filter chips they live here.
 
-  /** Where craft ingredients are bought. */
-  craftInputSource: InputSource;
-  /** Where the product is sold. */
-  craftOutputSource: OutputSource;
+  /**
+   * How craft ingredients may be got: bought on the flea or from a trader, bartered for, or
+   * crafted. The table takes whichever enabled route suits the row best.
+   */
+  craftBuyFrom: RouteKind[];
+  /** How the product may be got rid of, by the same four routes. */
+  craftSellTo: RouteKind[];
   /** Which flea figure stands in for the price. */
   craftFleaBasis: FleaBasis;
   /** Whether a trader offer above your recorded loyalty counts as a price you can pay. */
@@ -103,8 +106,10 @@ export const DEFAULT_SETTINGS: Settings = {
   showObjectivePins: true,
   craftingSkill: 0,
   hideoutManagement: 0,
-  craftInputSource: "cheapest",
-  craftOutputSource: "best",
+  // Markets only. Barter and craft routes are opt-in: they rewrite most rows into chains,
+  // which is a lot to take in before you have gone looking for it.
+  craftBuyFrom: [...MARKET_KINDS],
+  craftSellTo: [...MARKET_KINDS],
   craftFleaBasis: "avg24h",
   craftRespectLoyalty: true,
   craftIncludeFuel: true,
@@ -165,8 +170,31 @@ export async function remove(key: StoredKey): Promise<void> {
   await (await db()).delete(STORE, key);
 }
 
+/**
+ * The two single-choice fields the crafts table had before barters and crafts were routes.
+ *
+ * Read once, on load, so a reader who had narrowed the table to one market keeps that
+ * choice. Barter and craft stay off, as they are for everyone else until turned on.
+ */
+interface LegacySettings {
+  craftInputSource?: "cheapest" | "flea" | "trader";
+  craftOutputSource?: "best" | "flea" | "trader";
+}
+
+function migrateSources(single: string | undefined): RouteKind[] | undefined {
+  if (single === "flea" || single === "trader") return [single];
+  return single === undefined ? undefined : [...MARKET_KINDS];
+}
+
 export async function loadSettings(): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...((await get("settings")) ?? {}) };
+  const stored: Partial<Settings> & LegacySettings = (await get("settings")) ?? {};
+  const { craftInputSource, craftOutputSource, ...rest } = stored;
+  return {
+    ...DEFAULT_SETTINGS,
+    craftBuyFrom: migrateSources(craftInputSource) ?? DEFAULT_SETTINGS.craftBuyFrom,
+    craftSellTo: migrateSources(craftOutputSource) ?? DEFAULT_SETTINGS.craftSellTo,
+    ...rest,
+  };
 }
 
 /** How long a cached bundle is considered fresh: tasks, maps, traders, hideout and crafts. */

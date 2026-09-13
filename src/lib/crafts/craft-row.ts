@@ -6,47 +6,39 @@
  * the null discipline — an ingredient nobody sells has no cost, a craft with such an
  * ingredient has no profit, and both say so rather than settling for zero. A table sorted
  * on profit per hour is only worth reading if the top of it is real.
+ *
+ * How each ingredient is got and where the product goes is ./routes.ts's question. This
+ * adds the row's own craft to what it answers, and picks the one plan the row describes.
  */
 
-import type { TaskStatus } from "@/lib/logs/progress";
 import type { SellIndex, SellItem } from "@/lib/tarkovdev/client";
-import type { Craft, HideoutStation } from "@/lib/tarkovdev/economy";
+import type { Barter, Craft, HideoutStation } from "@/lib/tarkovdev/economy";
 
 import { stationNeedsPower } from "./fuel";
-import { craftTaskUnlock, unlockMet, type CraftUnlock } from "./unlocks";
-import type {
-  Acquisition,
-  Disposal,
-  InputSource,
-  MarketContext,
-  OutputSource,
-} from "./pricing";
-import { buyPrice, sellPrice } from "./pricing";
+import { craftPlan, type CraftPlan } from "./plan";
+import {
+  planner,
+  routeGraph,
+  type Disposal,
+  type RouteContext,
+  type RouteGraph,
+  type RouteLine,
+} from "./routes";
+import { craftSeconds } from "./skill";
+import { craftTaskUnlock, unlockMet } from "./unlocks";
+
+export { CRAFTING_MAX_LEVEL, CRAFTING_TIME_PER_LEVEL, craftSeconds } from "./skill";
+
+/** A consumed line of the row's own craft. The same shape as any line in a route. */
+export type CraftLine = RouteLine;
 
 /**
- * How much of a craft's time each level of the Crafting skill takes off.
+ * How many times the routes are re-chosen at a better rate before the row settles.
  *
- * 0.75% a level, reaching 37.5% at Elite. The skill also speeds cyclic production, which
- * is not something this table has rows for.
+ * The search converges in two or three on the live data; the cap is only there so a
+ * pathological case costs a bounded amount rather than a frozen tab.
  */
-export const CRAFTING_TIME_PER_LEVEL = 0.0075;
-
-/** Elite. Levels above this exist as a rank, not as more of the bonus. */
-export const CRAFTING_MAX_LEVEL = 50;
-
-export interface CraftLine {
-  itemId: string;
-  /** Null when the catalogue does not have the item, which means the documents disagree. */
-  item: SellItem | null;
-  /** Unrounded, because 0.66 of a water filter is genuinely what one craft asks for. */
-  count: number;
-  /** Present at the start, handed back at the end, so it costs nothing to run the craft. */
-  tool: boolean;
-  /** What one costs, and where from. Null for a tool, and for anything unpriceable. */
-  unit: Acquisition | null;
-  /** `unit` times `count`. Zero for a tool; null when there was no price to multiply. */
-  cost: number | null;
-}
+const RATE_ROUNDS = 6;
 
 export interface CraftRow {
   craft: Craft;
@@ -76,71 +68,125 @@ export interface CraftRow {
   productCount: number;
   /** The document's own figure, before the Crafting skill. */
   baseSeconds: number;
-  /** What it takes at the reader's skill level. */
+  /** What this craft takes at the reader's skill level. */
   seconds: number;
+  /**
+   * Time the chosen routes add: the crafts making its ingredients and the crafts its
+   * product goes on into, each scaled by how much of a run the row uses.
+   */
+  chainSeconds: number;
+  /** `seconds` plus `chainSeconds`, which is what profit per hour divides by. */
+  totalSeconds: number;
   /** Every consumed line added up, or null when any one of them had no price. */
   inputCost: number | null;
   /** Fuel burned over `seconds`. Zero when fuel is switched off or has no price. */
   fuelCost: number;
-  /** What the product clears, once. */
+  /** What the product clears, once, and how. */
   unitRevenue: Disposal | null;
   /** `unitRevenue` times `productCount`. */
   revenue: number | null;
   profit: number | null;
   profitPerHour: number | null;
+  /** Somewhere in the chosen routes is a barter or craft the reader is known not to be able to do. */
+  routeLocked: boolean;
+  /** The chosen routes as whole steps to carry out, for the fewest runs that come out even. See ./plan.ts. */
+  plan: CraftPlan;
 }
 
-export interface CraftRowOptions {
-  market: MarketContext;
-  inputSource: InputSource;
-  outputSource: OutputSource;
-  /** 0 to 50. Anything outside is clamped rather than refused. */
-  craftingSkill: number;
-  /** Roubles an hour of generator time costs, or null to charge no fuel. */
-  fuelRoublesPerHour: number | null;
-  /** Recorded hideout, for the runnable flag. */
-  hideoutLevels: Readonly<Record<string, number>>;
-  /** Station and product to unlocking task, from `craftUnlockIndex`. */
-  craftUnlocks: ReadonlyMap<string, CraftUnlock>;
-  /** Task progress from the logs, or null when there are no logs to read. */
-  taskStates: ReadonlyMap<string, { status: TaskStatus }> | null;
-}
+/** Everything a row needs beyond the craft, the catalogue and the graph. */
+export type CraftRowOptions = Omit<RouteContext, "index" | "graph">;
 
-/** Seconds one run takes at a given Crafting skill level. */
-export function craftSeconds(baseSeconds: number, craftingSkill: number): number {
-  const level = Math.min(CRAFTING_MAX_LEVEL, Math.max(0, Math.floor(craftingSkill || 0)));
-  return baseSeconds * (1 - CRAFTING_TIME_PER_LEVEL * level);
-}
+/** The parts of a row that depend on which routes were chosen. */
+type Choice = Pick<
+  CraftRow,
+  | "lines"
+  | "chainSeconds"
+  | "totalSeconds"
+  | "inputCost"
+  | "unitRevenue"
+  | "revenue"
+  | "profit"
+  | "profitPerHour"
+  | "routeLocked"
+>;
 
-function costLine(
-  line: Craft["requiredItems"][number],
-  index: SellIndex,
-  options: CraftRowOptions,
-): CraftLine {
-  const item = index.items[line.itemId] ?? null;
-  const base: CraftLine = {
-    itemId: line.itemId,
-    item,
-    count: line.exactCount,
-    tool: line.tool,
-    unit: null,
-    cost: line.tool ? 0 : null,
+function choose(
+  craft: Craft,
+  context: RouteContext,
+  seconds: number,
+  fuelCost: number,
+  rate: number,
+): Choice {
+  const routes = planner(context, craft.productItem.itemId, rate);
+  const count = craft.productItem.count;
+
+  const lines = craft.requiredItems.map((line) => routes.line(line));
+  // One unpriceable line poisons the sum, which is the point: a partial cost read as a
+  // whole one is a profit figure that is too high by however much was missing.
+  const inputCost = lines.some((line) => line.cost === null)
+    ? null
+    : lines.reduce((total, line) => total + (line.cost ?? 0), 0);
+
+  const unitRevenue = routes.dispose(craft.productItem.itemId);
+  const revenue = unitRevenue ? unitRevenue.net * count : null;
+
+  const chainSeconds =
+    lines.reduce((total, line) => total + (line.unit?.seconds ?? 0) * line.count, 0) +
+    (unitRevenue?.seconds ?? 0) * count;
+  const totalSeconds = seconds + chainSeconds;
+
+  const profit = revenue === null || inputCost === null ? null : revenue - inputCost - fuelCost;
+  // A craft with no duration cannot have a rate, and dividing by zero would put Infinity
+  // at the top of the default ordering.
+  const profitPerHour = profit === null || totalSeconds <= 0 ? null : profit / (totalSeconds / 3600);
+
+  return {
+    lines,
+    chainSeconds,
+    totalSeconds,
+    inputCost,
+    unitRevenue,
+    revenue,
+    profit,
+    profitPerHour,
+    routeLocked: lines.some((line) => line.unit?.locked) || (unitRevenue?.locked ?? false),
   };
-  // A tool is not bought for the craft, so pricing it would be an amount nobody pays.
-  if (line.tool || !item) return base;
+}
 
-  const unit = buyPrice(item, options.inputSource, options.market);
-  if (!unit) return base;
-  return { ...base, unit, cost: unit.priceRUB * line.exactCount };
+/**
+ * The route choice with the best profit per hour.
+ *
+ * Profit per hour is a ratio, and a ratio does not split into one best choice per
+ * ingredient. What does split is profit less hours at a fixed rate, so this is Dinkelbach's
+ * method: choose every route at the rate the last choice earned, and repeat while that earns
+ * more. Each round can only raise the rate, and a round that does not has found the best.
+ *
+ * It starts at zero, which is plain cheapest, and stops there whenever that choice adds no
+ * craft time — nothing slower can beat a choice that is already the cheapest and the
+ * fastest, which is most rows. A loss-making row is left at cheapest too: chasing its rate
+ * would favour slower routes to spread the loss thinner, which answers nobody's question.
+ */
+function bestChoice(craft: Craft, context: RouteContext, seconds: number, fuelCost: number): Choice {
+  let best = choose(craft, context, seconds, fuelCost, 0);
+  for (let round = 0; round < RATE_ROUNDS; round += 1) {
+    if (best.profitPerHour === null || best.profitPerHour <= 0 || best.chainSeconds === 0) break;
+    const next = choose(craft, context, seconds, fuelCost, best.profitPerHour);
+    // Under a rouble an hour is float noise, and a choice that merely ties is the same answer.
+    if (next.profitPerHour === null || next.profitPerHour < best.profitPerHour + 1) break;
+    best = next;
+  }
+  return best;
 }
 
 export function craftRow(
   craft: Craft,
-  stations: ReadonlyMap<string, HideoutStation>,
+  graph: RouteGraph,
   index: SellIndex,
   options: CraftRowOptions,
 ): CraftRow {
-  const station = stations.get(craft.stationId) ?? null;
+  const context: RouteContext = { ...options, index, graph };
+  const station = graph.stations.get(craft.stationId) ?? null;
+  const stationName = station?.name ?? craft.stationId;
   const recorded = options.hideoutLevels[craft.stationId];
   const recordedLevel = recorded === undefined ? null : recorded;
 
@@ -150,34 +196,20 @@ export function craftRow(
       ? null
       : unlockMet(unlock, options.taskStates.get(unlock.taskId)?.status);
 
-  const lines = craft.requiredItems.map((line) => costLine(line, index, options));
-  // One unpriceable line poisons the sum, which is the point: a partial cost read as a
-  // whole one is a profit figure that is too high by however much was missing.
-  const inputCost = lines.some((line) => line.cost === null)
-    ? null
-    : lines.reduce((total, line) => total + (line.cost ?? 0), 0);
-
   const seconds = craftSeconds(craft.durationSeconds, options.craftingSkill);
-  const hours = seconds / 3600;
   // A station that works with the generator off costs nothing to keep going, whatever the
   // generator is doing for the others.
   const usesPower = stationNeedsPower(station?.normalizedName);
   const fuelCost =
-    usesPower && options.fuelRoublesPerHour ? options.fuelRoublesPerHour * hours : 0;
+    usesPower && options.fuelRoublesPerHour ? (options.fuelRoublesPerHour * seconds) / 3600 : 0;
 
   const product = index.items[craft.productItem.itemId] ?? null;
-  const unitRevenue = product ? sellPrice(product, options.outputSource, options.market) : null;
-  const revenue = unitRevenue ? unitRevenue.net * craft.productItem.count : null;
-
-  const profit = revenue === null || inputCost === null ? null : revenue - inputCost - fuelCost;
-  // A craft with no duration cannot have a rate, and dividing by zero would put Infinity
-  // at the top of the default ordering.
-  const profitPerHour = profit === null || hours <= 0 ? null : profit / hours;
+  const chosen = bestChoice(craft, context, seconds, fuelCost);
 
   return {
     craft,
     station,
-    stationName: station?.name ?? craft.stationId,
+    stationName,
     recordedLevel,
     // An unrecorded station is treated as able, matching the keep list: silence about a
     // station is not the same as being told it is not built. The same holds for a gated
@@ -188,18 +220,22 @@ export function craftRow(
     taskDone,
     editionLocked: craft.gameEditions.length > 0,
     usesPower,
-    lines,
     product,
     productName: product?.name ?? craft.productItem.itemId,
     productCount: craft.productItem.count,
     baseSeconds: craft.durationSeconds,
     seconds,
-    inputCost,
     fuelCost,
-    unitRevenue,
-    revenue,
-    profit,
-    profitPerHour,
+    ...chosen,
+    plan: craftPlan({
+      craftId: craft.id,
+      stationName,
+      level: craft.level,
+      seconds,
+      lines: chosen.lines,
+      product: { itemId: craft.productItem.itemId, item: product, count: craft.productItem.count },
+      sale: chosen.unitRevenue,
+    }),
   };
 }
 
@@ -211,11 +247,14 @@ export function craftRow(
  * the query out of this means typing in the search box never re-prices anything.
  */
 export function craftRows(
-  crafts: readonly Craft[],
-  stations: readonly HideoutStation[],
+  economy: {
+    crafts: readonly Craft[];
+    stations: readonly HideoutStation[];
+    barters: readonly Barter[];
+  },
   index: SellIndex,
   options: CraftRowOptions,
 ): CraftRow[] {
-  const byId = new Map(stations.map((station) => [station.id, station]));
-  return crafts.map((craft) => craftRow(craft, byId, index, options));
+  const graph = routeGraph(economy);
+  return economy.crafts.map((craft) => craftRow(craft, graph, index, options));
 }

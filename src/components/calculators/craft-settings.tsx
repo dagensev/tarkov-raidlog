@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 
 import { Chip, Label, SelectField, TextField } from '@/components/ui';
 import { FUEL_TANKS } from '@/lib/crafts/fuel';
-import type { FleaBasis, InputSource, OutputSource } from '@/lib/crafts/pricing';
+import { MARKET_KINDS, ROUTE_KINDS, type FleaBasis, type RouteKind } from '@/lib/crafts/pricing';
 import { useAppStore } from '@/lib/store/app-store';
 import { useFuelCost } from '@/lib/store/hooks';
 
@@ -27,21 +27,32 @@ import { FIGURE, roubles } from './craft-format';
  * every session would make the page not worth opening.
  */
 
-const INPUT_SOURCES: ReadonlyArray<{ value: InputSource; label: string }> = [
-    { value: 'cheapest', label: 'Cheapest of the two' },
-    { value: 'flea', label: 'Flea only' },
-    { value: 'trader', label: 'Traders only' },
+/** The four routes, in the words each side of a craft uses for them. */
+const ROUTES: ReadonlyArray<{ kind: RouteKind; label: string; buy: string; sell: string }> = [
+    { kind: 'flea', label: 'Flea', buy: 'Buy it on the flea market', sell: 'List it on the flea, after the fee' },
+    { kind: 'trader', label: 'Trader', buy: 'Buy it from a trader for cash', sell: 'Sell it to a trader' },
+    {
+        kind: 'barter',
+        label: 'Barter',
+        buy: 'Trade other items to a trader for it',
+        sell: 'Trade it to a trader for something that sells for more',
+    },
+    {
+        kind: 'craft',
+        label: 'Craft',
+        buy: 'Make it at a hideout station, adding that craft’s time',
+        sell: 'Craft it on into something that sells for more, adding that craft’s time',
+    },
 ];
 
-const OUTPUT_SOURCES: ReadonlyArray<{ value: OutputSource; label: string }> = [
-    { value: 'best', label: 'Whichever clears more' },
-    { value: 'flea', label: 'Flea only' },
-    { value: 'trader', label: 'Traders only' },
-];
-
+/**
+ * Named for what the figure is, not when it was fetched. "24h average" read as a price a day
+ * old once prices started refreshing hourly, when the 24 hours is only the window the
+ * average is taken over — both figures arrive with the same hourly refresh.
+ */
 const BASES: ReadonlyArray<{ value: FleaBasis; label: string }> = [
-    { value: 'avg24h', label: '24h average' },
-    { value: 'lastLow', label: 'Last low' },
+    { value: 'avg24h', label: 'Average sale, last 24h' },
+    { value: 'lastLow', label: 'Lowest listing' },
 ];
 
 function Field({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
@@ -50,6 +61,62 @@ function Field({ label, hint, children }: { label: string; hint: string; childre
             <Label>{label}</Label>
             {children}
         </label>
+    );
+}
+
+const isMarket = (kind: RouteKind) => MARKET_KINDS.includes(kind);
+
+/**
+ * Which of the four routes one side of a craft may take.
+ *
+ * Toggles rather than a select, because the answer is a set: the table takes whichever
+ * enabled route suits each row, so "flea and barter but not trader" is a real choice. The
+ * last market on a side will not switch off — a barter or a craft is paid for in items, and
+ * a chain with no market to end at prices nothing, which would blank every row.
+ */
+function RouteToggles({
+    label,
+    side,
+    value,
+    onChange,
+}: {
+    label: string;
+    side: 'buy' | 'sell';
+    value: readonly RouteKind[];
+    onChange: (next: RouteKind[]) => void;
+}) {
+    const markets = value.filter(isMarket).length;
+
+    return (
+        <div className='flex min-w-0 flex-col gap-1.5' role='group' aria-label={label}>
+            <Label>{label}</Label>
+            <div className='flex flex-wrap gap-1.5'>
+                {ROUTES.map((route) => {
+                    const active = value.includes(route.kind);
+                    const pinned = active && isMarket(route.kind) && markets === 1;
+                    return (
+                        <Chip
+                            key={route.kind}
+                            active={active}
+                            title={
+                                pinned
+                                    ? `${route[side]}. The last market stays on: barters and crafts are paid for in items, and those have to be bought or sold somewhere.`
+                                    : route[side]
+                            }
+                            onClick={() => {
+                                if (pinned) return;
+                                // Rebuilt in the fixed order, so the stored list never depends on
+                                // the order the toggles were clicked in.
+                                onChange(ROUTE_KINDS.filter((kind) => (kind === route.kind ? !active : value.includes(kind))));
+                            }}
+                            className={pinned ? 'cursor-default' : undefined}
+                        >
+                            {route.label}
+                        </Chip>
+                    );
+                })}
+            </div>
+        </div>
     );
 }
 
@@ -135,43 +202,40 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
                 {/* How the table reaches its numbers. Three of its inputs are things the reader
                     supplied, and someone who has filled in none of them is looking at a weaker
-                    answer than they think, so it is said once here rather than on 213 rows. */}
-                <p className='border-b border-line/70 px-4 py-2.5 text-[12px] leading-relaxed text-muted'>
-                    <Label>How this works</Label> Ingredients are priced at whatever you could actually pay for them, the product at
-                    whatever clears the most after the flea takes its fee, and every craft at a powered station carries a share of the
-                    generator fuel it burns. The Lavatory runs without power, so its crafts carry none. Your hideout, trader loyalty and
-                    Crafting skill all move these figures, and all three are set on the{' '}
-                    <Link
-                        href='/settings/'
-                        className='text-steel underline decoration-line-bright underline-offset-2 transition-colors hover:text-amber hover:decoration-amber'
-                    >
-                        Settings page
-                    </Link>
-                    .
-                </p>
+                    answer than they think, so it is said once here rather than on 213 rows.
+                    One short point each, because a paragraph of it went unread. */}
+                <div className='border-b border-line/70 px-4 py-2.5 text-[12px] leading-relaxed text-muted'>
+                    <Label>How this works</Label>
+                    <ul className='mt-1 list-disc space-y-0.5 pl-4 marker:text-line-bright'>
+                        <li>Ingredients cost the cheapest way you can get them.</li>
+                        <li>The product earns the most it can, after the flea fee.</li>
+                        <li>Turn on Barter or Craft to let them replace buying or selling, up to three steps deep.</li>
+                        <li>Extra crafts add their time, so each row picks the plan with the best profit per hour.</li>
+                        <li>Barters and crafts you can’t do yet are still used, and marked in red.</li>
+                        <li>Powered stations are charged fuel.</li>
+                        <li>
+                            Hideout levels, trader loyalty and Crafting skill are set on the{' '}
+                            <Link
+                                href='/settings/'
+                                className='text-steel underline decoration-line-bright underline-offset-2 transition-colors hover:text-amber hover:decoration-amber'
+                            >
+                                Settings page
+                            </Link>
+                            .
+                        </li>
+                    </ul>
+                </div>
+
+                <div className='grid gap-4 border-b border-line/70 px-4 py-4 sm:grid-cols-2'>
+                    <RouteToggles label='Buy inputs from' side='buy' value={settings.craftBuyFrom} onChange={(next) => void update({ craftBuyFrom: next })} />
+                    <RouteToggles label='Sell output to' side='sell' value={settings.craftSellTo} onChange={(next) => void update({ craftSellTo: next })} />
+                </div>
 
                 <div className='grid gap-4 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3'>
-                    <Field label='Buy inputs from' hint='Where each ingredient is priced from.'>
-                        <SelectField value={settings.craftInputSource} onChange={(e) => void update({ craftInputSource: e.target.value as InputSource })}>
-                            {INPUT_SOURCES.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </SelectField>
-                    </Field>
-
-                    <Field label='Sell output to' hint='Compared on what actually lands, so the listing fee counts.'>
-                        <SelectField value={settings.craftOutputSource} onChange={(e) => void update({ craftOutputSource: e.target.value as OutputSource })}>
-                            {OUTPUT_SOURCES.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </SelectField>
-                    </Field>
-
-                    <Field label='Flea price' hint='Which flea figure stands in for the price, on both sides of the trade.'>
+                    <Field
+                        label='Flea price'
+                        hint='Which flea figure stands in for the price, on both sides of the trade. Both update with the hourly price refresh: the average smooths out spikes, the lowest listing is the cheapest offer at that refresh.'
+                    >
                         <SelectField value={settings.craftFleaBasis} onChange={(e) => void update({ craftFleaBasis: e.target.value as FleaBasis })}>
                             {BASES.map((option) => (
                                 <option key={option.value} value={option.value}>
@@ -182,7 +246,11 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                     </Field>
 
                     <Field label='Fuel tank' hint='Priced from its own flea figure, divided by how much it holds.'>
-                        <SelectField value={settings.fuelTankId} disabled={!settings.craftIncludeFuel} onChange={(e) => void update({ fuelTankId: e.target.value })}>
+                        <SelectField
+                            value={settings.fuelTankId}
+                            disabled={!settings.craftIncludeFuel}
+                            onChange={(e) => void update({ fuelTankId: e.target.value })}
+                        >
                             {FUEL_TANKS.map((tank) => (
                                 <option key={tank.itemId} value={tank.itemId}>
                                     {tank.label}
@@ -191,7 +259,10 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                         </SelectField>
                     </Field>
 
-                    <Field label='Fuel per hour' hint='Derived from the tank. Overwrite it to cover what the derivation leaves out, Hideout Management chiefly.'>
+                    <Field
+                        label='Fuel per hour'
+                        hint='Derived from the tank. Overwrite it to cover what the derivation leaves out, Hideout Management chiefly.'
+                    >
                         <TextField
                             type='number'
                             min={0}
@@ -208,7 +279,9 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
                     </Field>
 
                     <div className='flex flex-col justify-end gap-1.5'>
-                        <span className={`${FIGURE} text-[11px] text-muted`}>{fuel.solarPower ? 'Solar Power halves the burn' : 'No Solar Power recorded'}</span>
+                        <span className={`${FIGURE} text-[11px] text-muted`}>
+                            {fuel.solarPower ? 'Solar Power halves the burn' : 'No Solar Power recorded'}
+                        </span>
                         {settings.fuelRoublesPerHour !== null ? (
                             <button
                                 type='button'
@@ -240,8 +313,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
                 {fuelUnpriced ? (
                     <p className='border-t border-line/70 px-4 py-2.5 text-[12px] leading-relaxed text-amber-dim'>
-                        <Label>No fuel price</Label> The {fuel.tank.label} has no flea figure right now, so nothing is being charged for fuel. Type a
-                        figure above, or turn the charge off, rather than reading these profits as though fuel were free.
+                        <Label>No fuel price</Label> The {fuel.tank.label} has no flea figure right now, so nothing is being charged for fuel. Type a figure
+                        above, or turn the charge off, rather than reading these profits as though fuel were free.
                     </p>
                 ) : null}
             </div>

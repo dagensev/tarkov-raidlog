@@ -15,11 +15,24 @@ import { fleaMarketFee } from "@/lib/sell/fee";
 import { namedOffer, type NamedOffer } from "@/lib/sell/verdict";
 import type { FleaMarketRates, SellItem, TraderOffer } from "@/lib/tarkovdev/client";
 
-/** Where ingredients are sourced from. */
-export type InputSource = "cheapest" | "flea" | "trader";
+/**
+ * The four ways an item changes hands, on either side of a craft.
+ *
+ * The same four for buying and for selling, so one set of toggles reads the same way at
+ * both ends. Only the first two are markets; the other two are trades that need items of
+ * their own, and are worked out in ./routes.ts on top of what this module quotes.
+ */
+export type RouteKind = "flea" | "trader" | "barter" | "craft";
 
-/** Where the product is sold. */
-export type OutputSource = "best" | "flea" | "trader";
+export const ROUTE_KINDS: readonly RouteKind[] = ["flea", "trader", "barter", "craft"];
+
+/**
+ * The two that end a chain.
+ *
+ * A barter or a craft is paid for in items, and those items have to come from somewhere
+ * that takes money, so a set with neither of these prices nothing at all.
+ */
+export const MARKET_KINDS: readonly RouteKind[] = ["flea", "trader"];
 
 /**
  * Which flea figure stands in for "the price".
@@ -54,14 +67,16 @@ export interface MarketContext {
   hideoutManagement?: number;
 }
 
-export interface Acquisition {
+/** What a market charges for one of an item. */
+export interface BuyQuote {
   from: "flea" | "trader";
   priceRUB: number;
   /** The trader offer this came from, when it came from a trader. */
   offer: NamedOffer | null;
 }
 
-export interface Disposal {
+/** What a market pays for one of an item. */
+export interface SellQuote {
   to: "flea" | "trader";
   /** What you ask, before the flea takes anything. */
   priceRUB: number;
@@ -109,14 +124,19 @@ export function reachableOffer(
   return null;
 }
 
-/** What one of an item costs, from wherever `source` says to get it. */
+/**
+ * What one of an item costs, from the cheaper of the markets in `sources`.
+ *
+ * Barter and craft in the set are ignored here rather than refused: they are routes, not
+ * markets, and ./routes.ts weighs them against whatever this returns.
+ */
 export function buyPrice(
   item: SellItem,
-  source: InputSource,
+  sources: ReadonlySet<RouteKind>,
   context: MarketContext,
-): Acquisition | null {
-  const flea = source === "trader" ? null : fleaPrice(item, context.basis);
-  const offer = source === "flea" ? null : reachableOffer(item, context.traderLevels);
+): BuyQuote | null {
+  const flea = sources.has("flea") ? fleaPrice(item, context.basis) : null;
+  const offer = sources.has("trader") ? reachableOffer(item, context.traderLevels) : null;
 
   if (offer && (flea === null || offer.priceRUB <= flea)) {
     return {
@@ -130,7 +150,7 @@ export function buyPrice(
 }
 
 /** Listing the item, and what the fee leaves of it. */
-function listing(item: SellItem, context: MarketContext): Disposal | null {
+function listing(item: SellItem, context: MarketContext): SellQuote | null {
   const price = fleaPrice(item, context.basis);
   if (price === null) return null;
   const fee = fleaMarketFee(item.basePrice, price, context.rates, {
@@ -141,7 +161,7 @@ function listing(item: SellItem, context: MarketContext): Disposal | null {
 }
 
 /** Vendoring the item, which costs nothing to do. */
-function vendoring(item: SellItem, context: MarketContext): Disposal | null {
+function vendoring(item: SellItem, context: MarketContext): SellQuote | null {
   if (!item.bestTrader) return null;
   return {
     to: "trader",
@@ -153,20 +173,20 @@ function vendoring(item: SellItem, context: MarketContext): Disposal | null {
 }
 
 /**
- * What one of an item clears, sold wherever `source` says to sell it.
+ * What one of an item clears, sold to whichever market in `sinks` leaves more.
  *
- * "Best" compares the two on what lands rather than on what is asked, which is the whole
+ * The two are compared on what lands rather than on what is asked, which is the whole
  * point of carrying the fee: a listing that beats the trader on the sticker often loses
  * once the flea has taken its cut, and that is exactly the case a crafts table exists to
  * catch.
  */
 export function sellPrice(
   item: SellItem,
-  source: OutputSource,
+  sinks: ReadonlySet<RouteKind>,
   context: MarketContext,
-): Disposal | null {
-  const flea = source === "trader" ? null : listing(item, context);
-  const trader = source === "flea" ? null : vendoring(item, context);
+): SellQuote | null {
+  const flea = sinks.has("flea") ? listing(item, context) : null;
+  const trader = sinks.has("trader") ? vendoring(item, context) : null;
 
   if (flea && trader) return flea.net >= trader.net ? flea : trader;
   return flea ?? trader;

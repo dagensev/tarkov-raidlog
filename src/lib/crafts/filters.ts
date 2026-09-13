@@ -71,7 +71,8 @@ export function filterCraftRows(rows: readonly CraftRow[], view: CraftView): Cra
  */
 const VALUE: Record<Exclude<CraftSortKey, "station" | "craft">, (row: CraftRow) => number | null> =
   {
-    time: (row) => row.seconds,
+    // The whole chain, since that is how long the plan the row describes keeps you waiting.
+    time: (row) => row.totalSeconds,
     profit: (row) => row.profit,
     profitPerHour: (row) => row.profitPerHour,
   };
