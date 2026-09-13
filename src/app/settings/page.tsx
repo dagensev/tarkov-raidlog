@@ -231,9 +231,9 @@ function DataPanel() {
                 </Button>
                 {error ? <p className='data text-[11px] text-rust'>{error}</p> : null}
                 <p className='text-[12px] leading-relaxed text-muted'>
-                    Cached on this machine and refreshed daily. There is no prices-only endpoint,
-                    so bringing flea prices up to date means fetching the whole 16.7 MB catalogue
-                    again.
+                    Cached on this machine. Prices refresh hourly while the app is in view, and
+                    tasks, hideout and crafts daily. There is no prices-only endpoint, so each
+                    price refresh fetches the whole 16.7 MB catalogue again.
                 </p>
             </div>
         </Panel>

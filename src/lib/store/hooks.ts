@@ -204,9 +204,9 @@ export function useProgressCounts() {
  * Two gates, for the same reason. Only one copy of each document is cached, so switching
  * to PvE refetches everything and until it lands the cached copy belongs to the mode you
  * just left — serving that would put regular-mode barters on a PvE sell check. And a cache
- * lives a day, so after a release that changed the entry shape the copy on disk is the old
- * shape; serving that hands today's components yesterday's fields. `catalogueBehind`
- * already knows to refetch in both cases, and these two are what stop the page rendering
+ * lives an hour or a day, so after a release that changed the entry shape the copy on disk
+ * is the old shape; serving that hands today's components yesterday's fields.
+ * `catalogueBehind` already knows to refetch in both cases, and these two are what stop the page rendering
  * from the wrong copy while it does.
  */
 export function useEconomy(): EconomyBundle | null {

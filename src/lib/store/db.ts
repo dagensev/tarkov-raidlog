@@ -169,10 +169,22 @@ export async function loadSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...((await get("settings")) ?? {}) };
 }
 
-/** How long a cached bundle is considered fresh. */
+/** How long a cached bundle is considered fresh: tasks, maps, traders, hideout and crafts. */
 export const BUNDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** One rule for all three cached documents; each stamps the same `fetchedAt`. */
-export function isStale(document: { fetchedAt: number } | undefined): boolean {
-  return !document || Date.now() - document.fetchedAt > BUNDLE_TTL_MS;
+/**
+ * How long the item catalogue is considered fresh, which is how old a price may get.
+ *
+ * Shorter than the rest because it is the one document that moves by the minute — its
+ * `Last-Modified` trails the request by a couple of minutes, where crafts' is days old —
+ * and a flea verdict or a craft's profit is only as good as the price under it.
+ */
+export const PRICES_TTL_MS = 60 * 60 * 1000;
+
+/** One rule for every cached document; each stamps its own `fetchedAt`. */
+export function isStale(
+  document: { fetchedAt: number } | undefined,
+  ttlMs: number = BUNDLE_TTL_MS,
+): boolean {
+  return !document || Date.now() - document.fetchedAt > ttlMs;
 }

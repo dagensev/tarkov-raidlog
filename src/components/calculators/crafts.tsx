@@ -598,7 +598,7 @@ export function CraftsCalculator() {
                         {loading
                             ? 'Loading game data.'
                             : downloading
-                              ? 'Downloading prices and the hideout, barter and craft lists. It is a 16.7 MB fetch and happens once a day.'
+                              ? 'Downloading prices and the hideout, barter and craft lists. It is a 16.7 MB fetch and happens once an hour.'
                               : 'The catalogue did not load. Try refreshing from tarkov.dev in settings.'}
                     </EmptyNote>
                 ) : visible.length === 0 ? (

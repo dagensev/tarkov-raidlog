@@ -67,7 +67,7 @@ Three suites talk to the outside world and self-skip when it is absent, so a cle
 
 **The screenshots folder**, separately picked. Escape from Tarkov writes the player's position into every screenshot's file name, so `screenshots.ts` derives the in-raid trail from a directory listing and never opens a file.
 
-**tarkov.dev's JSON API**, not its GraphQL endpoint, which is retired and now 422s. See the header comment in `src/lib/tarkovdev/endpoints.ts`: documents are normalized (ids, not nested objects), display names live in separate `<path>_<lang>` translation dictionaries, and data is split by game mode. The mode comes from the log's `Session mode:` line unless overridden in settings. `client.ts` fetches a small core bundle first and defers the 16.7 MB item catalogue, so the task list renders before the big download finishes.
+**tarkov.dev's JSON API**, not its GraphQL endpoint, which is retired and now 422s. See the header comment in `src/lib/tarkovdev/endpoints.ts`: documents are normalized (ids, not nested objects), display names live in separate `<path>_<lang>` translation dictionaries, and data is split by game mode. The mode comes from the log's `Session mode:` line unless overridden in settings. `client.ts` fetches a small core bundle first and defers the 16.7 MB item catalogue, so the task list renders before the big download finishes. The catalogue carries the prices and ages out after an hour (`PRICES_TTL_MS`); everything else lasts a day. `refreshData` only fetches what is behind, and `startPriceRefresh` re-checks every five minutes while the tab is visible.
 
 ### State
 
@@ -88,7 +88,7 @@ Three suites talk to the outside world and self-skip when it is absent, so a cle
 ## Conventions that bite
 
 - **The logs are the only source of task progress.** There is no manual override, and the ability to mark a task done by hand was deliberately removed.
-- **Both cached catalogue halves are versioned, and both gates matter.** `SELL_INDEX_VERSION` and `ECONOMY_BUNDLE_VERSION` make `catalogueBehind` refetch, but a cache lives a day, so `useSellIndex` and `useEconomy` also refuse to serve a copy of the wrong version — otherwise today's components read yesterday's fields until the download lands. Bump the version in the same change that adds or renames a field.
+- **Both cached catalogue halves are versioned, and both gates matter.** `SELL_INDEX_VERSION` and `ECONOMY_BUNDLE_VERSION` make `catalogueBehind` refetch, but a cache lives up to a day, so `useSellIndex` and `useEconomy` also refuse to serve a copy of the wrong version — otherwise today's components read yesterday's fields until the download lands. Bump the version in the same change that adds or renames a field.
 - **A craft ingredient count comes in two shapes.** `ItemRequirement.count` is ceilinged for anything shown to the reader; `exactCount` is the unrounded figure, and costing must use it. Purified water asks for 0.66 of a water filter.
 - **`globals.css` zooms the root element**, so laid-out pixels and drawn pixels differ by a constant. Anything read from `getBoundingClientRect()`, `clientX/Y` or `window.innerHeight` that ends up back in a CSS length must be divided by `uiScale()` from `src/lib/ui-scale.ts`.
 - **Keep log regexes non-global.** They are reused across calls, and `lastIndex` would carry between them.

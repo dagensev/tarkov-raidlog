@@ -44,7 +44,7 @@ import type { TaskFilter } from "@/lib/tasks/filters";
 import type { MapFilter } from "@/lib/tasks/map-filter";
 import type { SortMode } from "@/lib/tasks/sort";
 import * as db from "./db";
-import { DEFAULT_SETTINGS, isStale, type Settings } from "./db";
+import { DEFAULT_SETTINGS, isStale, PRICES_TTL_MS, type Settings } from "./db";
 
 export type LogStatus =
   | "idle"
@@ -306,6 +306,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     void get().refreshData();
+    startPriceRefresh(get);
   },
 
   async connectLogs() {
@@ -385,7 +386,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // The item catalogue costs a 16.7 MB download and only labels keys on the task
         // screen, so it arrives after the list is already up. The sell check's data
         // rides along with it rather than triggering a second download of its own.
-        void loadCatalogue(bundle, set);
+        void loadCatalogue(bundle, set, get, force);
       } catch (error) {
         // Keep whatever is cached; a stale task list beats an empty screen.
         set({ dataError: (error as Error).message, dataLoading: false });
@@ -395,9 +396,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // The bundle can be fresh while the catalogue is not: it is a separate and much
     // larger fetch, so it can be missing entirely on the first run against an existing
-    // cache, a day behind, or left over from another game mode. Returning early on a
+    // cache, an hour behind, or left over from another game mode. Returning early on a
     // fresh bundle alone left the sell check empty until someone pressed refresh.
-    if (state.bundle && catalogueBehind(state, mode)) void loadCatalogue(state.bundle, set);
+    if (state.bundle && catalogueBehind(state, mode)) void loadCatalogue(state.bundle, set, get);
   },
 
   /**
@@ -454,6 +455,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   stopWatching() {
     stopPolling();
+    stopPriceRefresh?.();
   },
 }));
 
@@ -479,21 +481,32 @@ function resolveGameMode(state: Pick<AppState, "settings" | "sessionMode">): Gam
  * and both degrade to something usable.
  */
 /**
- * Whether either half of the catalogue is missing, a day old, from another mode, or of
- * an older shape than the page now reads.
+ * Whether the hideout, barter and craft lists are missing, a day old, from another mode,
+ * or of an older shape than the page now reads.
  */
+export function economyBehind(state: Pick<AppState, "economy">, mode: GameMode): boolean {
+  return (
+    state.economy?.mode !== mode ||
+    state.economy?.version !== ECONOMY_BUNDLE_VERSION ||
+    isStale(state.economy ?? undefined)
+  );
+}
+
+/** The same question of the item catalogue, which ages out after an hour rather than a day. */
+export function pricesBehind(state: Pick<AppState, "sellIndex">, mode: GameMode): boolean {
+  return (
+    state.sellIndex?.mode !== mode ||
+    state.sellIndex?.version !== SELL_INDEX_VERSION ||
+    isStale(state.sellIndex ?? undefined, PRICES_TTL_MS)
+  );
+}
+
+/** Whether either half of the catalogue wants fetching. */
 export function catalogueBehind(
   state: Pick<AppState, "economy" | "sellIndex">,
   mode: GameMode,
 ): boolean {
-  return (
-    state.economy?.mode !== mode ||
-    state.sellIndex?.mode !== mode ||
-    state.economy?.version !== ECONOMY_BUNDLE_VERSION ||
-    state.sellIndex?.version !== SELL_INDEX_VERSION ||
-    isStale(state.economy ?? undefined) ||
-    isStale(state.sellIndex ?? undefined)
-  );
+  return economyBehind(state, mode) || pricesBehind(state, mode);
 }
 
 /**
@@ -504,31 +517,78 @@ export function catalogueBehind(
  */
 let catalogueInFlight = false;
 
-async function loadCatalogue(bundle: CoreBundle, set: SetState): Promise<void> {
+/**
+ * Detaches the timer and listener that re-check the catalogue's age. Set by `hydrate`.
+ *
+ * `refreshData` otherwise runs only on load, on connecting a log folder and on a mode
+ * switch. That was enough when prices lived a day, but this is a tab people leave open
+ * for a whole session, and an hour would pass unnoticed until the next reload.
+ */
+let stopPriceRefresh: (() => void) | null = null;
+
+/** How often an open tab asks whether prices have aged out. Asking costs no fetch. */
+const PRICE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+function startPriceRefresh(get: GetState): void {
+  stopPriceRefresh?.();
+  // Only while the page is in view. Tarkov fullscreen keeps this tab hidden for a whole
+  // raid, and a 16.7 MB download nobody is looking at is bandwidth taken from the game;
+  // the visibility listener catches up the moment you alt-tab back, and until the new
+  // catalogue lands the old prices stay on screen under a "refresh due" stamp.
+  const check = () => {
+    if (document.visibilityState === "visible") void get().refreshData();
+  };
+  const timer = setInterval(check, PRICE_CHECK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", check);
+  stopPriceRefresh = () => {
+    clearInterval(timer);
+    document.removeEventListener("visibilitychange", check);
+    stopPriceRefresh = null;
+  };
+}
+
+/**
+ * Fetch whichever half of the catalogue is behind, or both when forced.
+ *
+ * Each half is checked on its own now that they age at different rates. Prices turn over
+ * hourly; refetching the hideout and craft lists with them would replace the `economy`
+ * object every hour for data that changes once a patch, and every memo keyed on it — the
+ * keep list over ~500 tasks among them — would rebuild for nothing.
+ */
+async function loadCatalogue(
+  bundle: CoreBundle,
+  set: SetState,
+  get: GetState,
+  force = false,
+): Promise<void> {
   if (catalogueInFlight) return;
   catalogueInFlight = true;
   set({ catalogueLoading: true });
 
   try {
-    try {
-      const economy = await loadEconomyBundle(bundle.mode);
-      await db.set("economyBundle", economy);
-      set({ economy });
-    } catch {
-      // 437 KB against the catalogue's 16.7 MB, so it goes first: failing here must not
-      // take the big download down with it.
+    if (force || economyBehind(get(), bundle.mode)) {
+      try {
+        const economy = await loadEconomyBundle(bundle.mode);
+        await db.set("economyBundle", economy);
+        set({ economy });
+      } catch {
+        // 437 KB against the catalogue's 16.7 MB, so it goes first: failing here must not
+        // take the big download down with it.
+      }
     }
 
-    try {
-      const { index, sell } = await loadItemCatalogue(
-        bundle.mode,
-        referencedItemIds(bundle.tasks),
-      );
-      await db.set("itemIndex", index);
-      await db.set("sellIndex", sell);
-      set({ itemIndex: index, sellIndex: sell });
-    } catch {
-      // Keys fall back to showing an id, as they did before the catalogue existed.
+    if (force || pricesBehind(get(), bundle.mode)) {
+      try {
+        const { index, sell } = await loadItemCatalogue(
+          bundle.mode,
+          referencedItemIds(bundle.tasks),
+        );
+        await db.set("itemIndex", index);
+        await db.set("sellIndex", sell);
+        set({ itemIndex: index, sellIndex: sell });
+      } catch {
+        // Keys fall back to showing an id, as they did before the catalogue existed.
+      }
     }
   } finally {
     catalogueInFlight = false;

@@ -595,7 +595,7 @@ export default function FleaPage() {
                         {loading
                             ? 'Loading game data.'
                             : downloading
-                              ? 'Downloading prices and the hideout, barter and craft lists. It is a 16.7 MB fetch and happens once a day.'
+                              ? 'Downloading prices and the hideout, barter and craft lists. It is a 16.7 MB fetch and happens once an hour.'
                               : 'The catalogue did not load. Try the button below.'}
                     </EmptyNote>
                 ) : visible.length === 0 ? (

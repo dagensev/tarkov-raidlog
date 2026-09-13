@@ -301,7 +301,7 @@ export interface SellItem {
 /**
  * Bump whenever `SellItem` gains a field the page reads.
  *
- * A cached index is kept for a day, so without this a new field renders blank until the
+ * A cached index is kept for an hour, so without this a new field renders blank until the
  * next refresh — present in the code, absent from every existing reader's cache, and
  * indistinguishable from a bug. A mismatch makes the catalogue count as behind.
  */
