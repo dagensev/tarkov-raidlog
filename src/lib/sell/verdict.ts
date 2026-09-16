@@ -137,7 +137,14 @@ export function rowsFor(
  * The flea tab's row source. Most of these are wanted by nothing, which is the point —
  * the sell check only ever showed the keep list, and an item you cannot see is an item you
  * cannot price.
+ *
+ * Presets are the one exclusion: tarkov.dev's pre-built gun and helmet entries are not
+ * things that sit in a stash, and left in they put a second "Altyn" beside every real one
+ * in a search for something you cannot hold. They are in the catalogue rather than dropped
+ * on the way in because the calculators need them — 163 barters hand one over — so the
+ * exclusion belongs here, where the question is what to put on a table of your own items.
  */
 export function catalogueRows(index: SellIndex, keep: KeepList, context: PriceContext): SellRow[] {
-  return rowsFor(Object.values(index.items), keep, context);
+  const items = Object.values(index.items).filter((item) => !item.types.includes("preset"));
+  return rowsFor(items, keep, context);
 }

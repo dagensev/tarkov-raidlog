@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { barterRows, type BarterRow } from "@/lib/barters/barter-row";
 import { craftRows, type CraftRow } from "@/lib/crafts/craft-row";
 import { FUEL_TANKS, fuelRoublesPerHour, solarPowerBuilt } from "@/lib/crafts/fuel";
 import { fleaPrice, type MarketContext } from "@/lib/crafts/pricing";
@@ -25,7 +26,7 @@ import {
   type HideoutStation,
 } from "@/lib/tarkovdev/economy";
 import { mapsWithTasks, resolveMap } from "@/lib/tarkovdev/maps";
-import type { GameMap, TarkovData, Task } from "@/lib/tarkovdev/types";
+import type { GameMap, TarkovData, Task, Trader } from "@/lib/tarkovdev/types";
 import { isRaidActive, resolveGameMode, useAppStore } from "./app-store";
 
 /**
@@ -43,6 +44,8 @@ const EMPTY_KEEP: KeepList = new Map();
 const EMPTY_ROWS: SellRow[] = [];
 const EMPTY_CRAFT_ROWS: CraftRow[] = [];
 const EMPTY_STATIONS: HideoutStation[] = [];
+const EMPTY_BARTER_ROWS: BarterRow[] = [];
+const EMPTY_TRADERS: Trader[] = [];
 
 /**
  * The API's normalized documents, reshaped into nested objects.
@@ -439,4 +442,94 @@ export function useCraftStations(): HideoutStation[] {
     const used = new Set(economy.crafts.map((craft) => craft.stationId));
     return economy.stations.filter((station) => used.has(station.id));
   }, [economy]);
+}
+
+/**
+ * The rows the barters calculator renders: one per barter.
+ *
+ * Same assembly as `useCraftRows`, and deliberately off the same settings — a reader who
+ * says what a flea price means on one calculator has said it for both. Neither the fuel cost
+ * nor the craft unlock index is wanted here: a barter burns no generator time, and its own
+ * unlocking task survives the importer rather than having to be recovered from task rewards.
+ *
+ * 806 rows against the crafts tab's 213, so the same rule matters more: built once per data
+ * or assumption change, filtered per keystroke.
+ */
+export function useBarterRows(): BarterRow[] {
+  const economy = useEconomy();
+  const index = useSellIndex();
+  const traderNames = useTraderNames();
+  const price = usePriceContext();
+
+  const events = useAppStore((s) => s.events);
+  const taskStates = useTaskStates();
+  // No events means no logs, and with no logs the page cannot say a task is unfinished —
+  // which is a different thing from knowing that it is.
+  const knownTaskStates = events.length > 0 ? taskStates : null;
+  // Only ever read for a craft reached as a route below the trade; a barter carries its own
+  // unlocking task, which the importer does not drop the way it drops a craft's.
+  const bundle = useAppStore((s) => s.bundle);
+  const craftUnlocks = useMemo(() => craftUnlockIndex(bundle?.tasks ?? {}), [bundle]);
+
+  const hideoutLevels = useAppStore((s) => s.settings.hideoutLevels);
+  const traderLevels = useAppStore((s) => s.settings.traderLevels);
+  const buyFromList = useAppStore((s) => s.settings.craftBuyFrom);
+  const sellToList = useAppStore((s) => s.settings.craftSellTo);
+  const buyFrom = useMemo(() => new Set(buyFromList), [buyFromList]);
+  const sellTo = useMemo(() => new Set(sellToList), [sellToList]);
+  const basis = useAppStore((s) => s.settings.craftFleaBasis);
+  const respectLoyalty = useAppStore((s) => s.settings.craftRespectLoyalty);
+  const craftingSkill = useAppStore((s) => s.settings.craftingSkill);
+
+  const market: MarketContext = useMemo(
+    () => ({
+      rates: price.rates,
+      traderNames,
+      traderLevels: respectLoyalty ? traderLevels : null,
+      basis,
+      intelligenceCenter: price.intelligenceCenter,
+      hideoutManagement: price.hideoutManagement,
+    }),
+    [price, traderNames, traderLevels, respectLoyalty, basis],
+  );
+
+  return useMemo(() => {
+    if (!economy || !index) return EMPTY_BARTER_ROWS;
+    return barterRows(economy, index, {
+      market,
+      buyFrom,
+      sellTo,
+      craftingSkill,
+      // A barter burns no fuel itself. A craft reached through one does, so the charge is
+      // left off rather than switched off: it would be a figure nobody could see the source
+      // of on a table with no time column.
+      fuelRoublesPerHour: null,
+      hideoutLevels,
+      traderLevels,
+      craftUnlocks,
+      taskStates: knownTaskStates,
+    });
+  }, [
+    craftUnlocks,
+    knownTaskStates,
+    economy,
+    index,
+    market,
+    buyFrom,
+    sellTo,
+    traderLevels,
+    craftingSkill,
+    hideoutLevels,
+  ]);
+}
+
+/** The traders that actually have barters, for the filter chips. */
+export function useBarterTraders(): Trader[] {
+  const economy = useEconomy();
+  const traders = useTarkovData()?.traders;
+  return useMemo(() => {
+    if (!economy || !traders) return EMPTY_TRADERS;
+    const used = new Set(economy.barters.map((barter) => barter.traderId));
+    return traders.filter((trader) => used.has(trader.id));
+  }, [economy, traders]);
 }

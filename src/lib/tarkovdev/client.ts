@@ -315,7 +315,15 @@ export interface SellItem {
    * exist. Where loyalty does not matter, read the front of the list.
    */
   buyOffers: TraderOffer[];
-  /** tarkov.dev's own tags, e.g. `barter`, `keys`, `noFlea`. Presets never reach here. */
+  /**
+   * tarkov.dev's own tags, e.g. `barter`, `keys`, `noFlea`, `preset`.
+   *
+   * `preset` is the one worth knowing about: a preset is tarkov.dev's pre-built gun or
+   * helmet entry rather than a thing that sits in a stash, and the flea tab drops them for
+   * that reason — see `catalogueRows`. They stay in the catalogue because 163 of the 806
+   * barters and four crafts *hand one over*, and without an entry those rows drew a raw
+   * hex id and an empty box.
+   */
   types: string[];
   /**
    * Item category ancestry as normalized names, e.g. `silencer` up through `weapon-mod`.
@@ -331,6 +339,18 @@ export interface SellItem {
    */
   iconLink?: string;
   /**
+   * The stash-grid picture, at the item's own proportions rather than in a square.
+   *
+   * A separate asset because `iconLink` is always 64×64 whatever the item is: an AKM's icon
+   * is the rifle shrunk into a square with padding either side, so drawn in a box the shape
+   * of its five-by-two footprint it came out a small square floating in the middle. The
+   * grid image for the same rifle is 316×127 — the ratio of the footprint — and fills it.
+   *
+   * Stored on the same terms as `iconLink`, which covers 5206 of 5320. Read it through
+   * `itemGridLink`, never directly.
+   */
+  gridImageLink?: string;
+  /**
    * How much of its resource a full one holds, for the five items that have one.
    *
    * Only the two generator fuel tanks are ever read — 100 units for the metal one, 60 for
@@ -341,13 +361,18 @@ export interface SellItem {
 }
 
 /**
- * Bump whenever `SellItem` gains a field the page reads.
+ * Bump whenever `SellItem` gains a field the page reads, or the catalogue gains entries.
  *
  * A cached index is kept for an hour, so without this a new field renders blank until the
  * next refresh — present in the code, absent from every existing reader's cache, and
  * indistinguishable from a bug. A mismatch makes the catalogue count as behind.
+ *
+ * 6 added the presets, which a cache built before it simply does not hold — and a barter
+ * whose product is missing from the catalogue has no price at all, not merely a blank one.
+ * 7 added `gridImageLink`, without which a gun drawn at its footprint is a small square
+ * adrift in a wide box.
  */
-export const SELL_INDEX_VERSION = 5;
+export const SELL_INDEX_VERSION = 7;
 
 /** What the flea charges to list something. Both rates read 0.05 at time of writing. */
 export interface FleaMarketRates {
@@ -372,15 +397,25 @@ export interface SellIndex {
   version?: number;
   /** When the catalogue was downloaded. Prices are only ever as fresh as this. */
   fetchedAt: number;
-  /** Every item that can sit in a stash, keyed by id. Presets excluded. */
+  /** Every item the documents name, keyed by id, presets included. See `SellItem.types`. */
   items: Record<string, SellItem>;
   /** Listing fee rates, read from the same document as the prices they apply to. */
   fleaMarket: FleaMarketRates;
 }
 
-/** The icon URL, derived where it follows the usual pattern. */
+/** The 64×64 icon, derived where it follows the usual pattern. For a square slot. */
 export function itemIconLink(item: SellItem): string {
   return item.iconLink ?? `https://assets.tarkov.dev/${item.id}-icon.webp`;
+}
+
+/**
+ * The stash-grid picture, for a box drawn at the item's footprint.
+ *
+ * Use this wherever the box is not a square — the calculators' process cells — and
+ * `itemIconLink` wherever it is, since the icon is the smaller download of the two.
+ */
+export function itemGridLink(item: SellItem): string {
+  return item.gridImageLink ?? `https://assets.tarkov.dev/${item.id}-grid-image.webp`;
 }
 
 /** The tarkov.dev page, which follows `normalizedName` for every item in the catalogue. */
@@ -501,10 +536,7 @@ export async function loadItemCatalogue(
       };
     }
 
-    // Presets are tarkov.dev's pre-built gun entries, not things that sit in a stash.
-    // Left in they would appear in every weapon search without ever being sellable.
     const types = item.types ?? [];
-    if (types.includes("preset")) continue;
 
     const entry: SellItem = {
       id,
@@ -527,6 +559,10 @@ export async function loadItemCatalogue(
     };
     const derivable = `https://assets.tarkov.dev/${id}-icon.webp`;
     if (item.iconLink && item.iconLink !== derivable) entry.iconLink = item.iconLink;
+    const derivableGrid = `https://assets.tarkov.dev/${id}-grid-image.webp`;
+    if (item.gridImageLink && item.gridImageLink !== derivableGrid) {
+      entry.gridImageLink = item.gridImageLink;
+    }
     // Set rather than defaulted to null, so the field costs nothing on the 5315 items with
     // no resource to speak of.
     if (item.properties?.propertiesType === "ItemPropertiesResource" && item.properties.units) {

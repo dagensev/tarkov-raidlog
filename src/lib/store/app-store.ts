@@ -38,6 +38,7 @@ import {
   gameModeFromSessionMode,
   type GameMode,
 } from "@/lib/tarkovdev/endpoints";
+import { DEFAULT_BARTER_VIEW, type BarterView } from "@/lib/barters/filters";
 import { DEFAULT_CRAFT_VIEW, type CraftView } from "@/lib/crafts/filters";
 import { DEFAULT_SELL_VIEW, type SellView } from "@/lib/sell/filters";
 import { nextLevels } from "@/lib/sell/hideout-levels";
@@ -142,6 +143,7 @@ interface AppState {
    * about your account rather than choices about what you are currently looking at.
    */
   craftView: CraftView;
+  barterView: BarterView;
 
   hydrate: () => Promise<void>;
   connectLogs: () => Promise<void>;
@@ -156,6 +158,7 @@ interface AppState {
   setTaskView: (patch: Partial<TaskView>) => void;
   setSellView: (patch: Partial<SellView>) => void;
   setCraftView: (patch: Partial<CraftView>) => void;
+  setBarterView: (patch: Partial<BarterView>) => void;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   stopWatching: () => void;
 }
@@ -265,6 +268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress", members: [] },
   sellView: DEFAULT_SELL_VIEW,
   craftView: DEFAULT_CRAFT_VIEW,
+  barterView: DEFAULT_BARTER_VIEW,
 
   async hydrate() {
     const [settings, events, bundle, itemIndex, economy, sellIndex] =
@@ -442,6 +446,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSellView(patch) {
     set({ sellView: { ...get().sellView, ...patch } });
+  },
+
+  setBarterView(patch) {
+    set({ barterView: { ...get().barterView, ...patch } });
   },
 
   setCraftView(patch) {

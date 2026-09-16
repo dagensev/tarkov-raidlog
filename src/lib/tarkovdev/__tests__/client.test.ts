@@ -492,26 +492,28 @@ describe("loadItemCatalogue", () => {
     expect(index.key1).toMatchObject({ name: "Dorm room key", shortName: "Dorm" });
   });
 
-  it("keeps every non-preset item in the sell index, requested or not", async () => {
+  it("keeps every item in the sell index, requested or not", async () => {
     const { sell } = await loadItemCatalogue("regular", ["key1"], {
       ...opts,
       fetchImpl: fetchImpl(),
     });
-    expect(Object.keys(sell.items).sort()).toEqual(["key1", "lamp"]);
+    expect(Object.keys(sell.items).sort()).toEqual(["key1", "lamp", "m4"]);
   });
 
-  it("drops presets, which are built guns rather than stash items", async () => {
+  it("keeps presets, which the calculators need and the flea tab drops for itself", async () => {
+    // 163 barters and four crafts hand over a preset. Dropped here, every one of those
+    // rows lost its product entirely and drew a raw hex id with an empty icon box.
     const { sell } = await loadItemCatalogue("regular", [], { ...opts, fetchImpl: fetchImpl() });
-    expect(sell.items.m4).toBeUndefined();
+    expect(sell.items.m4?.types).toContain("preset");
   });
 
-  it("a preset is excluded from the sell index even when it is also a requested key", async () => {
+  it("a requested preset reaches both indexes", async () => {
     const { index, sell } = await loadItemCatalogue("regular", ["m4"], {
       ...opts,
       fetchImpl: fetchImpl(),
     });
     expect(index.m4).toBeDefined();
-    expect(sell.items.m4).toBeUndefined();
+    expect(sell.items.m4).toBeDefined();
   });
 
   it("picks the best trader on roubles, never on the quoted price", async () => {

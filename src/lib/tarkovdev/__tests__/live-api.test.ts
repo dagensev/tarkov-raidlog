@@ -411,10 +411,11 @@ const catalogue = await probeCatalogue();
 describe.skipIf(!catalogue)("live item catalogue", () => {
   const items = () => Object.values(catalogue!.items);
 
-  it("returns the whole catalogue with presets dropped", () => {
-    // Measured at 4835 of the 5320 the document holds.
+  it("returns the whole catalogue, presets included", () => {
+    // Measured at 5320, of which 485 are presets. They are here for the calculators: 163
+    // barters hand one over, and the flea tab drops them itself in .
     expect(items().length).toBeGreaterThan(4000);
-    expect(items().filter((item) => item.types.includes("preset"))).toEqual([]);
+    expect(items().filter((item) => item.types.includes("preset")).length).toBeGreaterThan(300);
   });
 
   it("carries a buy offer for the items traders stock", () => {

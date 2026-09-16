@@ -14,9 +14,26 @@ import { useState } from "react";
  * would only repeat it. Renders nothing when there is no icon or the fetch fails, rather
  * than leaving a broken-image glyph in the middle of a list.
  */
-export function ItemIcon({ src, size = 16 }: { src?: string | null; size?: number }) {
+export function ItemIcon({
+  src,
+  size = 16,
+  width,
+  height,
+}: {
+  src?: string | null;
+  size?: number;
+  /**
+   * A box of its own, for an item drawn at its stash footprint rather than in a square —
+   * a 5×2 rifle in the calculators' process cell. `object-contain` keeps the picture's own
+   * proportions inside it, so a box a cell too wide letterboxes rather than stretching.
+   */
+  width?: number;
+  height?: number;
+}) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) return null;
+
+  const box = { width: width ?? size, height: height ?? size };
 
   return (
     // Plain <img>: these are external files, and next/image cannot optimise them under
@@ -26,13 +43,13 @@ export function ItemIcon({ src, size = 16 }: { src?: string | null; size?: numbe
       src={src}
       alt=""
       aria-hidden
-      width={size}
-      height={size}
+      width={box.width}
+      height={box.height}
       // The task list renders hundreds of rows at once; without this every key on every
       // row would be requested before you scrolled to any of them.
       loading="lazy"
       onError={() => setFailed(true)}
-      style={{ width: size, height: size }}
+      style={box}
       className="shrink-0 object-contain"
     />
   );

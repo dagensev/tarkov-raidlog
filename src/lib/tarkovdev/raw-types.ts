@@ -271,6 +271,8 @@ export interface RawItem {
   normalizedName: string;
   wikiLink?: string | null;
   iconLink?: string | null;
+  /** The stash-grid picture, drawn at `width` × `height` rather than squared off. */
+  gridImageLink?: string | null;
   /** Grid footprint in stash cells. */
   width?: number;
   height?: number;

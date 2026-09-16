@@ -2,50 +2,47 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ItemIcon } from '@/components/item-icon';
 import { PriceStamp } from '@/components/price-stamp';
 import { Chip, EmptyNote, Label, Panel, PanelHeader, Pill, TextField, cx } from '@/components/ui';
-import type { CraftRow } from '@/lib/crafts/craft-row';
+import type { BarterRow } from '@/lib/barters/barter-row';
 import {
-    CRAFT_LEVELS,
-    filterCraftRows,
-    nextCraftSort,
-    sortCraftRows,
-    type CraftSortKey,
-    type CraftView,
-} from '@/lib/crafts/filters';
-import { exceedsRestock } from '@/lib/crafts/plan';
+    BARTER_LEVELS,
+    filterBarterRows,
+    nextBarterSort,
+    sortBarterRows,
+    type BarterSortKey,
+    type BarterView,
+} from '@/lib/barters/filters';
 import { useAppStore } from '@/lib/store/app-store';
-import { useCraftRows, useCraftStations, useEconomy, useSellIndex, useTasks } from '@/lib/store/hooks';
+import { useBarterRows, useBarterTraders, useEconomy, useSellIndex, useTasks } from '@/lib/store/hooks';
 import { rowWindow } from '@/lib/table/window';
 import { uiScale } from '@/lib/ui-scale';
 
-import { Breakdown, TaskNames, countText } from './craft-breakdown';
+import { BarterBreakdown } from './barter-breakdown';
+import { TaskNames } from './breakdown';
+import { FIGURE, Money, duration, roubles } from './craft-format';
 import { CraftSettings } from './craft-settings';
-import { FIGURE, Money, duration } from './craft-format';
 import { HeaderCell, type Column } from './header-cell';
 import { PROCESS_HEIGHT, Process, tradeOut } from './process';
 
 /**
- * The height of one collapsed row, in pixels.
+ * The barters table.
  *
- * `CELL` at `PROCESS_HEIGHT`, its 10px of padding top and bottom, and the 1px rule under
- * it. The windowing needs this up front rather than measured, and it has to be the real
- * number — the border sits outside the declared height, so being one out puts every spacer
- * a pixel per row wrong. Nothing sets the row height directly; these three add up to it.
- *
- * Far taller than the flea tab's 77 because the process cell draws each item at its stash
- * footprint, which is the whole point of drawing it that way: an M4A1 is a wide flat thing
- * and squaring it off threw away the one fact the picture was there to carry.
+ * The same shape as the crafts table, and for the same reasons — a windowed fixed-height
+ * table under the page's own scrollbar, filters that only ever narrow, and a row that opens
+ * into its own working. What differs is the question it answers. See `@/lib/barters/barter-row`
+ * for why a barter needs both a Saves column and a Resell one.
  */
+
+/** Same as the crafts table's: `CELL` at `PROCESS_HEIGHT`, 10px of padding each side, the 1px rule. */
 const ROW_HEIGHT = PROCESS_HEIGHT + 21;
 
 /**
  * The cell's own content box.
  *
  * Fixed and clipped rather than left to the content: the windowing assumes every collapsed
- * row is exactly `ROW_HEIGHT`, and one craft with six ingredients growing to fit would put
- * every row below it out of place.
+ * row is exactly `ROW_HEIGHT`, and the one barter in the data that asks for five items would
+ * put every row below it out of place if it grew to fit.
  */
 const CELL = 'flex items-center overflow-hidden';
 
@@ -55,49 +52,48 @@ const CELL_HEIGHT = { height: PROCESS_HEIGHT };
 /** Roughly what the breakdown adds. Only ever an estimate; the real one is measured. */
 const OPEN_HEIGHT_GUESS = 200;
 
-/**
- * The columns, in order.
- *
- * `width` is a percentage of a fixed-layout table rather than something the content
- * decides: the rows are windowed, so a column that sized itself to whatever happened to be
- * on screen would jump every time you scrolled.
- */
-const COLUMNS: ReadonlyArray<Column<CraftSortKey>> = [
-    { key: 'station', label: 'Station', title: 'By station, then by the level it needs', width: '10%' },
+const COLUMNS: ReadonlyArray<Column<BarterSortKey>> = [
+    { key: 'trader', label: 'Trader', title: 'By trader, then by the loyalty the offer needs', width: '11%' },
     {
-        key: 'craft',
-        // The widest column the table can spare, because it is the one carrying pictures and
-        // names. At 60%, 18 of the 214 crafts have more boxes and labels than fit and clip,
-        // against 29 at the 48% it had when every name was cut to seven characters.
-        label: 'Craft',
-        title: 'What goes in and what comes out. Alphabetical by product.',
-        width: '60%',
+        key: 'barter',
+        // The widest the table can spare, for the same reason the crafts tab gives its own
+        // process column: only 10 of the 806 barters have more boxes and labels than fit.
+        label: 'Barter',
+        title: 'What you hand over and what you get. Alphabetical by what you get.',
+        width: '52%',
     },
     {
-        key: 'time',
-        label: 'Craft time',
-        title: 'One run at your Crafting skill, plus any crafts its plan runs to make an ingredient or take the product. Fastest first.',
+        key: 'cost',
+        label: 'Cost',
+        title: 'What the items you hand over cost you, however your settings say to get them. Cheapest first.',
         width: '10%',
         centred: true,
     },
     {
-        key: 'profit',
-        label: 'Profit',
-        title: 'What one run clears: the product sold or traded on, less the ingredients however they were got, less the fuel',
+        key: 'savings',
+        label: 'Savings',
+        title: 'What buying the item outright would have cost, less what the trade costs you. This is what a barter is for.',
+        width: '11%',
+        centred: true,
+    },
+    {
+        key: 'resell',
+        label: 'Resell',
+        title: 'What the trade clears if you sell what you get rather than keep it. A traded item is not found in raid, so this is never a flea price — which is why it is usually a loss.',
         width: '10%',
         centred: true,
     },
     {
-        key: 'profitPerHour',
-        label: 'Profit / H',
-        title: 'That profit over the time the station is occupied, which is what actually ranks a craft',
-        width: '10%',
+        key: 'limit',
+        label: 'Limit',
+        title: 'How many times one restock lets you make the trade',
+        width: '6%',
         centred: true,
     },
 ];
 
 /** What the task badge says on hover: which task gates it, and what the logs know about it. */
-function taskTitle(row: CraftRow, taskName: string | null): string {
+function taskTitle(row: BarterRow, taskName: string | null): string {
     const name = taskName ?? 'a task';
     if (row.taskDone === true) return `Unlocked by ${name}, which your logs show you have`;
     if (row.taskDone === false) return `Unlocked by ${name}, which your logs do not show done yet`;
@@ -110,17 +106,11 @@ function Row({
     open,
     onToggle,
 }: {
-    row: CraftRow;
+    row: BarterRow;
     taskName: string | null;
     open: boolean;
     onToggle: () => void;
 }) {
-    // The document's own time, worth showing only when the skill has moved it.
-    const reduced = Math.round(row.seconds) !== Math.round(row.baseSeconds);
-    // On the row as well as in the plan, since a rationed barter changes whether the figure
-    // is one you can take home tonight, which is worth knowing before opening anything.
-    const rationed = row.plan.steps.find((step) => exceedsRestock(step, row.plan.batch));
-
     return (
         <tr
             onClick={onToggle}
@@ -132,12 +122,11 @@ function Row({
         >
             <td className='px-3 py-[10px]'>
                 <div className={cx(CELL, 'gap-2')} style={CELL_HEIGHT}>
-                    {row.station?.imageLink ? <ItemIcon src={row.station.imageLink} size={28} /> : null}
                     <span className='min-w-0 flex-1'>
-                        <span className='block truncate text-[12px] text-bone' title={row.stationName}>
-                            {row.stationName}
+                        <span className='block truncate text-[12px] text-bone' title={row.traderName}>
+                            {row.traderName}
                         </span>
-                        <span className='data text-[10px] text-muted'>lvl {row.craft.level}</span>
+                        <span className='data text-[10px] text-muted'>LL{row.minLevel}</span>
                     </span>
                 </div>
             </td>
@@ -149,7 +138,7 @@ function Row({
                         product={row.product}
                         productName={row.productName}
                         productCount={row.productCount}
-                        productTrade={tradeOut(row.unitRevenue)}
+                        productTrade={tradeOut(row.resale)}
                     />
                     <span className='flex shrink-0 flex-col gap-1'>
                         {row.taskLocked ? (
@@ -157,15 +146,10 @@ function Row({
                                 <span title={taskTitle(row, taskName)}>task</span>
                             </Pill>
                         ) : null}
-                        {row.editionLocked ? (
-                            <Pill tone='steel'>
-                                <span title='Edge of Darkness only'>edition</span>
-                            </Pill>
-                        ) : null}
-                        {row.recordedLevel !== null && row.recordedLevel < row.craft.level ? (
+                        {row.recordedLevel !== null && row.recordedLevel < row.minLevel ? (
                             <Pill tone='rust'>
-                                <span title={`Your ${row.stationName} is recorded at ${row.recordedLevel}`}>
-                                    level {row.craft.level}
+                                <span title={`Your ${row.traderName} is recorded at ${row.recordedLevel}`}>
+                                    LL{row.minLevel}
                                 </span>
                             </Pill>
                         ) : null}
@@ -176,12 +160,12 @@ function Row({
                                 </span>
                             </Pill>
                         ) : null}
-                        {rationed ? (
+                        {/* A barter is instant, so any wait at all came from a craft the plan
+                            runs to make one of the items you hand over. */}
+                        {row.chainSeconds > 0 ? (
                             <Pill tone='amber'>
-                                <span
-                                    title={`Each run of this craft needs ${countText(rationed.runs / row.plan.batch)} trades with ${rationed.where}, which allows ${rationed.limit} a restock. The figures assume you can make them all.`}
-                                >
-                                    restock
+                                <span title={`The plan waits ${duration(row.chainSeconds)} on crafts to make what this trade takes`}>
+                                    {duration(row.chainSeconds)}
                                 </span>
                             </Pill>
                         ) : null}
@@ -190,28 +174,28 @@ function Row({
             </td>
 
             <td className='px-3 py-[10px]'>
-                <div className={cx(CELL, 'flex-col items-center justify-center text-center')} style={CELL_HEIGHT}>
-                    <span className={cx(FIGURE, 'text-[12px] text-bone')}>{duration(row.totalSeconds)}</span>
-                    {row.chainSeconds > 0 ? (
-                        <span
-                            className={cx(FIGURE, 'text-[10px] text-amber-dim')}
-                            title={`${duration(row.seconds)} for this craft, and ${duration(row.chainSeconds)} of the crafts its plan runs to make an ingredient or take the product`}
-                        >
-                            {duration(row.chainSeconds)} chain
-                        </span>
-                    ) : reduced ? (
-                        <span className={cx(FIGURE, 'text-[10px] text-muted')} title='Before your Crafting skill'>
-                            was {duration(row.baseSeconds)}
-                        </span>
-                    ) : null}
+                <div className={cx(CELL, 'justify-center text-center')} style={CELL_HEIGHT}>
+                    <span className={cx(FIGURE, 'text-[12px]', row.cost === null ? 'text-rust' : 'text-bone')}>
+                        {row.cost === null ? '—' : roubles(row.cost)}
+                    </span>
                 </div>
             </td>
 
             <td className='px-3 py-[10px]'>
                 <div className={cx(CELL, 'justify-center text-center')} style={CELL_HEIGHT}>
                     <Money
-                        value={row.profit}
-                        title='One run: the product sold, less every ingredient, less the fuel burned'
+                        value={row.savings}
+                        title='What the item would have cost you to buy, less what this trade costs'
+                        className='text-[13px]'
+                    />
+                </div>
+            </td>
+
+            <td className='px-3 py-[10px]'>
+                <div className={cx(CELL, 'justify-center text-center')} style={CELL_HEIGHT}>
+                    <Money
+                        value={row.resell}
+                        title='What it clears sold on rather than kept. Never a flea price: a traded item is not found in raid.'
                         className='text-[12px]'
                     />
                 </div>
@@ -219,26 +203,24 @@ function Row({
 
             <td className='px-3 py-[10px]'>
                 <div className={cx(CELL, 'justify-center text-center')} style={CELL_HEIGHT}>
-                    <Money
-                        value={row.profitPerHour}
-                        title='That profit over the hours the station is occupied'
-                        className='text-[13px]'
-                    />
+                    <span className={cx(FIGURE, 'text-[12px]', row.limit === null ? 'text-muted' : 'text-bone')}>
+                        {row.limit === null ? '∞' : `×${row.limit}`}
+                    </span>
                 </div>
             </td>
         </tr>
     );
 }
 
-export function CraftsCalculator() {
-    const rows = useCraftRows();
-    const stations = useCraftStations();
+export function BartersCalculator() {
+    const rows = useBarterRows();
+    const traders = useBarterTraders();
     const tasks = useTasks();
     const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.name])), [tasks]);
     const index = useSellIndex();
     const economy = useEconomy();
-    const view = useAppStore((s) => s.craftView);
-    const setView = useAppStore((s) => s.setCraftView);
+    const view = useAppStore((s) => s.barterView);
+    const setView = useAppStore((s) => s.setBarterView);
     const loading = useAppStore((s) => s.dataLoading);
     const downloading = useAppStore((s) => s.catalogueLoading);
 
@@ -251,10 +233,10 @@ export function CraftsCalculator() {
     const [viewportHeight, setViewportHeight] = useState(800);
     const body = useRef<HTMLTableSectionElement | null>(null);
 
-    const visible = useMemo(() => sortCraftRows(filterCraftRows(rows, view), view), [rows, view]);
+    const visible = useMemo(() => sortBarterRows(filterBarterRows(rows, view), view), [rows, view]);
 
     const openIndex = useMemo(
-        () => (openId === null ? -1 : visible.findIndex((row) => row.craft.id === openId)),
+        () => (openId === null ? -1 : visible.findIndex((row) => row.barter.id === openId)),
         [visible, openId],
     );
 
@@ -266,14 +248,14 @@ export function CraftsCalculator() {
         open: openIndex >= 0 ? { index: openIndex, height: openHeight } : null,
     });
 
-    // The page's own scrollbar drives the table, the way the flea tab does it — a second
-    // one inside a panel means two things to drag and a header that scrolls away from the
-    // rows it labels.
+    // The page's own scrollbar drives the table, the way the crafts and flea tabs do it — a
+    // second one inside a panel means two things to drag and a header that scrolls away from
+    // the rows it labels.
     useEffect(() => {
         const read = () => {
-            // Both come back in drawn pixels, and everything they are compared against is
-            // in laid-out ones. `globals.css` zooms the root, so without the divide the
-            // window is a quarter too tall and lands a quarter too far down the list.
+            // Both come back in drawn pixels, and everything they are compared against is in
+            // laid-out ones. `globals.css` zooms the root, so without the divide the window
+            // is a quarter too tall and lands a quarter too far down the list.
             const scale = uiScale();
             const element = body.current;
             setScrolled(element ? -element.getBoundingClientRect().top / scale : 0);
@@ -291,24 +273,24 @@ export function CraftsCalculator() {
     // Sorting or filtering under a scrolled table leaves you somewhere arbitrary in a list
     // that is no longer the one you were reading, so every control goes through here.
     const apply = useCallback(
-        (patch: Partial<CraftView>) => {
+        (patch: Partial<BarterView>) => {
             setView(patch);
             window.scrollTo({ top: 0 });
         },
         [setView],
     );
 
-    // Measured rather than guessed: the breakdown is one line per ingredient and some
-    // crafts have six, so a fixed guess would leave every row below it out of place.
+    // Measured rather than guessed: the breakdown is one line per item handed over, and a
+    // route under one of them adds a whole indented block.
     const measureOpen = useCallback((element: HTMLTableRowElement | null) => {
         if (element) setOpenHeight(element.offsetHeight);
     }, []);
 
-    const toggleStation = (id: string) =>
+    const toggleTrader = (id: string) =>
         apply({
-            stations: view.stations.includes(id)
-                ? view.stations.filter((each) => each !== id)
-                : [...view.stations, id],
+            traders: view.traders.includes(id)
+                ? view.traders.filter((each) => each !== id)
+                : [...view.traders, id],
         });
 
     const toggleLevel = (level: number) =>
@@ -322,7 +304,7 @@ export function CraftsCalculator() {
         <div className='space-y-4'>
             <Panel className='rise'>
                 <PanelHeader
-                    title='Crafts'
+                    title='Barters'
                     action={
                         <>
                             {index ? <PriceStamp fetchedAt={index.fetchedAt} /> : null}
@@ -335,30 +317,30 @@ export function CraftsCalculator() {
                     <TextField
                         value={view.query}
                         onChange={(e) => apply({ query: e.target.value })}
-                        placeholder='Search a product or an ingredient'
-                        aria-label='Search a product or an ingredient'
+                        placeholder='Search what you get or what it takes'
+                        aria-label='Search what you get or what it takes'
                         className='w-64'
                     />
-                    {stations.map((station) => (
+                    {traders.map((trader) => (
                         <Chip
-                            key={station.id}
-                            active={view.stations.includes(station.id)}
-                            onClick={() => toggleStation(station.id)}
-                            title={`Only ${station.name} crafts`}
+                            key={trader.id}
+                            active={view.traders.includes(trader.id)}
+                            onClick={() => toggleTrader(trader.id)}
+                            title={`Only ${trader.name} barters`}
                         >
-                            {station.name}
+                            {trader.name}
                         </Chip>
                     ))}
                 </div>
 
                 <div className='flex flex-wrap items-center gap-2 px-4 py-3'>
-                    <Label>Station level</Label>
-                    {CRAFT_LEVELS.map((level) => (
+                    <Label>Loyalty</Label>
+                    {BARTER_LEVELS.map((level) => (
                         <Chip
                             key={level}
                             active={view.levels.includes(level)}
                             onClick={() => toggleLevel(level)}
-                            title={`Crafts that need the station at level ${level}`}
+                            title={`Barters that need the trader at loyalty ${level}`}
                         >
                             {level}
                         </Chip>
@@ -368,14 +350,14 @@ export function CraftsCalculator() {
                         <Chip
                             active={view.runnableOnly}
                             onClick={() => apply({ runnableOnly: !view.runnableOnly })}
-                            title='Hide crafts your recorded hideout is too low for, or whose unlocking task your logs do not show done. Anything unrecorded counts as able.'
+                            title='Hide barters your recorded loyalty is too low for, or whose unlocking task your logs do not show done. Anything unrecorded counts as able.'
                         >
-                            Can run now
+                            Can trade now
                         </Chip>
                         <Chip
                             active={view.hideTaskLocked}
                             onClick={() => apply({ hideTaskLocked: !view.hideTaskLocked })}
-                            title='Hide crafts a task unlocks'
+                            title='Hide barters a task unlocks'
                         >
                             Hide task-locked
                         </Chip>
@@ -383,11 +365,10 @@ export function CraftsCalculator() {
                 </div>
             </Panel>
 
-
             <Panel className='rise' style={{ animationDelay: '120ms' }}>
                 <PanelHeader
-                    title='Craft list'
-                    meta={`${visible.length.toLocaleString()} of ${rows.length.toLocaleString()} crafts`}
+                    title='Barter list'
+                    meta={`${visible.length.toLocaleString()} of ${rows.length.toLocaleString()} barters`}
                 />
                 {!index || !economy ? (
                     <EmptyNote>
@@ -415,7 +396,7 @@ export function CraftsCalculator() {
                                             column={column}
                                             sort={view.sort}
                                             descending={view.descending}
-                                            onSort={() => apply(nextCraftSort(view, column.key))}
+                                            onSort={() => apply(nextBarterSort(view, column.key))}
                                         />
                                     ))}
                                 </tr>
@@ -431,20 +412,20 @@ export function CraftsCalculator() {
                                 ) : null}
 
                                 {visible.slice(slice.start, slice.end).map((row) => {
-                                    const open = openId === row.craft.id;
+                                    const open = openId === row.barter.id;
                                     return (
-                                        <Fragment key={row.craft.id}>
+                                        <Fragment key={row.barter.id}>
                                             <Row
                                                 row={row}
                                                 taskName={row.taskUnlock ? (taskNames.get(row.taskUnlock) ?? null) : null}
                                                 open={open}
-                                                onToggle={() => setOpenId(open ? null : row.craft.id)}
+                                                onToggle={() => setOpenId(open ? null : row.barter.id)}
                                             />
                                             {open ? (
                                                 <tr ref={measureOpen} className='bg-panel-2/60'>
                                                     <td colSpan={COLUMNS.length} className='px-4 pt-3 pb-3'>
                                                         <TaskNames.Provider value={taskNames}>
-                                                            <Breakdown row={row} />
+                                                            <BarterBreakdown row={row} />
                                                         </TaskNames.Provider>
                                                     </td>
                                                 </tr>

@@ -103,12 +103,24 @@ export interface CraftPlan {
   leftovers: PlanItem[];
 }
 
-/** The row's own craft, and the routes chosen on either side of it. */
+/**
+ * The row's own craft or barter, and the routes chosen on either side of it.
+ *
+ * A barter root is the barters tab's; everything below treats it exactly as it treats a
+ * barter reached partway down a route, which is what lets one plan serve both tables.
+ */
 export interface PlanRoot {
-  craftId: string;
-  stationName: string;
+  kind: "craft" | "barter";
+  /** The craft's or the barter's id. */
+  id: string;
+  /** The station's name for a craft, the trader's for a barter. */
+  where: string;
+  /** Station level for a craft, loyalty level for a barter. */
   level: number;
+  /** One run at the Crafting skill. Zero for a barter. */
   seconds: number;
+  /** Barter only: trades one restock allows, or null for no limit. */
+  limit: number | null;
   lines: readonly RouteLine[];
   product: PlanItem;
   sale: Disposal | null;
@@ -280,18 +292,20 @@ function simulate(root: PlanRoot, batch: number): CraftPlan & { short: boolean }
 
   for (const line of root.lines) obtain(line, line.count * batch);
   const made: PlanItem = { ...root.product, count: root.product.count * batch };
-  // The row's own gates are on the row already, so its step carries none.
+  // The row's own gates are on the row already, so its step carries none. Its restock limit
+  // is carried anyway, and never fires `exceedsRestock` — the root runs exactly `batch`
+  // times, so it is one trade per run of the row however large the batch grew.
   record({
-    kind: "craft",
-    id: root.craftId,
-    where: root.stationName,
+    kind: root.kind,
+    id: root.id,
+    where: root.where,
     level: root.level,
     runs: batch,
     seconds: root.seconds,
     takes: consumed(root.lines, batch),
     gives: [{ ...made, spare: 0 }],
     gates: [],
-    limit: null,
+    limit: root.limit,
   });
   release(made, root.sale);
 

@@ -8,14 +8,17 @@ import { cx } from '@/components/ui';
 /**
  * The strip inside the Calculators tab.
  *
- * One entry today, and a strip anyway. Barters, hideout upgrades and the Bitcoin Farm are
- * all the same shape of page and all want to sit beside crafts rather than beside Raid
- * and Squad — five top-level tabs is a navigation bar, nine is a menu.
+ * Hideout upgrades and the Bitcoin Farm are the same shape of page as these two, and want
+ * to sit beside them rather than beside Raid and Squad — five top-level tabs is a
+ * navigation bar, nine is a menu.
  *
- * Crafts stays at the index rather than moving to `/calculators/crafts/` when a second
- * one arrives, so no link ever points at a route that used to exist.
+ * Crafts stays at the index rather than moving to `/calculators/crafts/` now that a second
+ * one has arrived, so no link ever points at a route that used to exist.
  */
-const CALCULATORS = [{ href: '/calculators/', label: 'Crafts' }] as const;
+const CALCULATORS = [
+    { href: '/calculators/', label: 'Crafts' },
+    { href: '/calculators/barters/', label: 'Barters' },
+] as const;
 
 export function CalculatorTabs() {
     const pathname = usePathname();

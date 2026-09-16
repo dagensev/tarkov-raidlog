@@ -201,4 +201,16 @@ describe("catalogueRows", () => {
     expect(rows.map((r) => r.item.id).sort()).toEqual(["gold-chain", "wires"]);
     expect(rows.find((r) => r.item.id === "gold-chain")?.verdict).toBe("ok-to-sell");
   });
+
+  it("leaves out presets, which are in the catalogue for the calculators only", () => {
+    // A preset is tarkov.dev's pre-built gun entry, not a thing in anyone's stash. It stays
+    // in the catalogue because 163 barters hand one over and those rows need a name and an
+    // icon; it must not reach a table of items you own.
+    const rows = catalogueRows(
+      index([item("altyn"), item("altyn-preset", { types: ["preset", "noFlea"] })]),
+      list([]),
+      plain,
+    );
+    expect(rows.map((r) => r.item.id)).toEqual(["altyn"]);
+  });
 });
