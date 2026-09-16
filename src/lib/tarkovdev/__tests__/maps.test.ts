@@ -32,6 +32,7 @@ const map = (
   players: null,
   enemies: null,
   description: null,
+  extracts: [],
 });
 
 const MAPS = [

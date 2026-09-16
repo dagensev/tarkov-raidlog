@@ -14,6 +14,7 @@ const map = (id: string, name: string): GameMap => ({
   players: null,
   enemies: null,
   description: null,
+  extracts: [],
 });
 
 const MAPS = [map("m1", "Customs"), map("m2", "Factory"), map("m3", "Woods")];

@@ -19,7 +19,12 @@ import {
   loadEconomyBundle,
   type EconomyBundle,
 } from "../economy";
-import { mapsWithTasks, resolveMap, taskIsOnMap } from "../maps";
+import { calibrationFor } from "@/lib/maps/calibration";
+import { EXTRACT_REQUIREMENTS } from "@/lib/maps/extract-requirements";
+import { extractMarkers } from "@/lib/maps/extracts";
+import { project } from "@/lib/maps/project";
+
+import { foldedMapIds, mapsWithTasks, resolveMap, taskIsOnMap } from "../maps";
 
 /**
  * Checks the real tarkov.dev JSON API.
@@ -170,6 +175,99 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
     );
   });
 
+  it("keeps extracts through the strip, which is the one piece of geometry that survives", () => {
+    const total = Object.values(bundle!.maps).reduce((n, map) => n + (map.extracts?.length ?? 0), 0);
+    // 152 across 17 maps when this was written. A floor well under that catches the field
+    // being dropped again without failing every time BSG adds or removes a door.
+    expect(total).toBeGreaterThan(140);
+  });
+
+  it("resolves extract names through the maps translation document", () => {
+    // "Old Azs Gate" is a misspelled key that happens to read as English, which is exactly
+    // why the lookup cannot be skipped: without it the app ships tarkov.dev's typo.
+    const data = denormalize(bundle!);
+    const customs = data.maps.find((m) => m.normalizedName === "customs");
+    expect(customs!.extracts.map((e) => e.name)).toContain("Old Gas Station Gate");
+    expect(customs!.extracts.every((e) => e.name.length > 0)).toBe(true);
+  });
+
+  it("projects extract positions onto the drawings they are marked on", () => {
+    // What catches a bounds or rotation regression breaking every marker at once, the way
+    // `live-svg.test.ts` catches a redrawn map.
+    //
+    // Asserted two ways rather than as a per-map ratio, because a per-map floor would have
+    // to be set low enough for Ground Zero, which really does publish three exits far
+    // outside the drawn area — UN Roadblock at x=-527 against bounds that stop at -99, and
+    // East Gate 340 metres past the other end — while every one of its spawns sits inside.
+    // That is upstream data, not a calibration fault, and the overlay already drops anything
+    // out of range. So: no map may lose *all* its markers, which is what a broken rotation
+    // looks like, and the whole set must stay overwhelmingly on the map. Measured 122 of 129
+    // inside when this was written, the seven being Ground Zero's three and four single
+    // exits sitting within 1.5% of an edge.
+    const data = denormalize(bundle!);
+    const folded = foldedMapIds(data.maps);
+    let total = 0;
+    let onMap = 0;
+    const empty: string[] = [];
+
+    for (const map of data.maps) {
+      const calibration = calibrationFor(map);
+      const markers = extractMarkers(data.maps, map.id, folded);
+      if (!calibration || markers.length === 0) continue;
+      const inside = markers.filter((marker) => {
+        const { u, v } = project(calibration, marker.position);
+        return u >= 0 && u <= 1 && v >= 0 && v <= 1;
+      }).length;
+      total += markers.length;
+      onMap += inside;
+      // Named rather than counted, so a failure says which map drifted.
+      if (inside === 0) empty.push(map.normalizedName);
+    }
+
+    expect(empty).toEqual([]);
+    expect(total).toBeGreaterThan(100);
+    expect(onMap / total).toBeGreaterThan(0.85);
+  });
+
+  it("has a requirements table whose every entry still matches a published exit", () => {
+    // The table is vendored from the game's own config, so nothing upstream keeps it honest.
+    // This does: a renamed or removed exit turns into a key that matches nothing, which is a
+    // condition silently not being shown rather than a visible break. Named rather than
+    // counted, so the failure says which entry went stale.
+    const data = denormalize(bundle!);
+    const orphans: string[] = [];
+
+    for (const [mapName, exits] of Object.entries(EXTRACT_REQUIREMENTS)) {
+      const map = data.maps.find((m) => m.normalizedName === mapName);
+      if (!map) {
+        orphans.push(`${mapName} (no such map)`);
+        continue;
+      }
+      const published = new Set(map.extracts.map((extract) => extract.nameId));
+      for (const nameId of Object.keys(exits)) {
+        if (!published.has(nameId)) orphans.push(`${mapName}/${nameId}`);
+      }
+    }
+
+    expect(orphans).toEqual([]);
+  });
+
+  it("still gates the exits the table says it gates", () => {
+    // A spot check on the join rather than on the table's contents: these three are the ones
+    // worth getting wrong-proof, since walking to a cliff without a Red Rebel costs the raid.
+    const data = denormalize(bundle!);
+    const folded = foldedMapIds(data.maps);
+    const labels = (mapName: string, displayName: string) => {
+      const map = data.maps.find((m) => m.normalizedName === mapName)!;
+      const marker = extractMarkers(data.maps, map.id, folded).find((m) => m.name === displayName);
+      return marker?.conditions.map((c) => c.label) ?? null;
+    };
+
+    expect(labels("reserve", "Cliff Descent")).toEqual(["red rebel + paracord", "no body armour"]);
+    expect(labels("reserve", "Sewer Manhole")).toEqual(["no backpack"]);
+    expect(labels("interchange", "Saferoom Exfil")).toEqual(["lock yourself in"]);
+  });
+
   it("reports what the live API returned", () => {
     const data = denormalize(bundle!);
     const keys = referencedItemIds(bundle!.tasks).length;
@@ -183,6 +281,8 @@ describe.skipIf(!bundle)("live tarkov.dev JSON API", () => {
         `  objectives    ${data.tasks.reduce((n, t) => n + t.objectives.length, 0)}`,
         `  kappa tasks   ${data.tasks.filter((t) => t.kappaRequired).length}`,
         `  key items     ${keys}`,
+        `  extracts      ${data.maps.reduce((n, m) => n + m.extracts.length, 0)}`,
+        `  gated exits   ${Object.values(EXTRACT_REQUIREMENTS).reduce((n, m) => n + Object.keys(m).length, 0)}`,
         `  map names     ${data.maps.map((m) => m.name).join(", ")}`,
         `  pickable maps ${mapsWithTasks(data.maps, data.tasks).map((m) => m.name).join(", ")}`,
         "",

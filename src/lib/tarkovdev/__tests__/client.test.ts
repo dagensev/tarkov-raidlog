@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CORE_BUNDLE_VERSION,
   TarkovDevError,
   denormalize,
   fetchJson,
   itemIconLink,
   itemPageLink,
+  loadCoreBundle,
   loadItemCatalogue,
   referencedItemIds,
   type CoreBundle,
@@ -127,6 +129,7 @@ function bundle(): CoreBundle {
 
   return {
     mode: "pvp-season",
+    version: CORE_BUNDLE_VERSION,
     tasks: { t1: task, t0: prerequisite },
     maps: {
       map1: {
@@ -139,6 +142,26 @@ function bundle(): CoreBundle {
         wiki: null,
         raidDuration: 35,
         players: "10-12",
+        extracts: [
+          {
+            id: "x1",
+            name: "Old Azs Gate",
+            faction: "scav",
+            switch: "sw1",
+            switches: ["sw1"],
+            position: { x: 300, y: 3, z: -198 },
+            outline: [
+              { x: 310, y: 1, z: -206 },
+              { x: 310, y: 1, z: -190 },
+              { x: 290, y: 1, z: -190 },
+            ],
+            top: 5,
+            bottom: 1,
+            transferItem: { item: "roubles", count: 20000 },
+          },
+          // No faction, no switch, no outline, no toll — the shape Night Factory publishes.
+          { id: "x2", name: "EXFIL_ZB013", position: { x: 0, y: 0, z: 0 } },
+        ],
       },
     },
     traders: {
@@ -155,6 +178,8 @@ function bundle(): CoreBundle {
       "t0 name": "Debut",
       o1: "Locate the Emercom station on Ground Zero",
       "map1 Name": "Customs",
+      "Old Azs Gate": "Old Gas Station Gate",
+      EXFIL_ZB013: "ZB-013",
       "trader1 name": "Prapor",
       "map1 description": "An industrial area.",
     },
@@ -267,6 +292,97 @@ describe("denormalize", () => {
     const objective = denormalize(bundle()).tasks.find((t) => t.id === "t1")!.objectives[0];
     expect(objective.zones).toEqual([]);
     expect(objective.possibleLocations).toEqual([]);
+  });
+});
+
+describe("loadCoreBundle", () => {
+  /** The maps document as the API sends it: one map carrying far more than the app keeps. */
+  function mapsDoc() {
+    return {
+      data: {
+        maps: {
+          map1: {
+            id: "map1",
+            name: "map1 Name",
+            normalizedName: "customs",
+            nameId: "bigmap",
+            scenePath: "maps/customs_preset.bundle",
+            description: null,
+            wiki: null,
+            raidDuration: 35,
+            players: "10-12",
+            extracts: [{ id: "x1", name: "Old Azs Gate", position: { x: 1, y: 2, z: 3 } }],
+            spawns: [{ position: { x: 0, y: 0, z: 0 } }],
+            lootContainers: [{ id: "c1" }],
+            hazards: [{ id: "h1" }],
+          },
+        },
+        mobs: { m1: {} },
+      },
+    };
+  }
+
+  const fetchImpl = () =>
+    vi.fn<typeof fetch>(async (url) => {
+      const path = String(url);
+      if (path.endsWith("_en")) return response(200, { data: {} });
+      if (path.endsWith("/maps")) return response(200, mapsDoc());
+      return response(200, { data: {} });
+    });
+
+  it("keeps extracts through the strip and drops the rest of the geometry", async () => {
+    // The 9.5 MB the strip exists to throw away, against the one field the raid map needs.
+    const loaded = await loadCoreBundle("pvp-season", { ...opts, fetchImpl: fetchImpl() });
+    const map = loaded.maps.map1 as unknown as Record<string, unknown>;
+    expect(map.extracts).toHaveLength(1);
+    expect(map.spawns).toBeUndefined();
+    expect(map.lootContainers).toBeUndefined();
+    expect(map.hazards).toBeUndefined();
+  });
+
+  it("stamps the shape version, so an older cache refetches rather than rendering blank", async () => {
+    const loaded = await loadCoreBundle("pvp-season", { ...opts, fetchImpl: fetchImpl() });
+    expect(loaded.version).toBe(CORE_BUNDLE_VERSION);
+  });
+});
+
+describe("denormalize extracts", () => {
+  const extracts = () => denormalize(bundle()).maps[0].extracts;
+
+  it("translates the name, which is a key even when it already reads as English", () => {
+    // "Old Azs Gate" is a misspelled key, not display text. Skipping the lookup ships the typo.
+    expect(extracts()[0].name).toBe("Old Gas Station Gate");
+    expect(extracts()[1].name).toBe("ZB-013");
+  });
+
+  it("carries the faction, and reads an absent one as shared", () => {
+    expect(extracts()[0].faction).toBe("scav");
+    expect(extracts()[1].faction).toBe("shared");
+  });
+
+  it("does not carry the switch reference, which says nothing about this exit", () => {
+    // Every extract on a map repeats the same value, and on a map with no switches at all it
+    // is the string "false". Anything derived from it marks every exit on the map.
+    expect(extracts()[0]).not.toHaveProperty("needsSwitch");
+    expect(extracts()[0]).not.toHaveProperty("switch");
+  });
+
+  it("folds the transfer item into a toll, and null where there is none", () => {
+    expect(extracts()[0].toll).toEqual({ itemId: "roubles", count: 20000 });
+    expect(extracts()[1].toll).toBeNull();
+  });
+
+  it("carries the outline, and null where the entry publishes none", () => {
+    expect(extracts()[0].outline).toHaveLength(3);
+    expect(extracts()[1].outline).toBeNull();
+  });
+
+  it("gives a map with no extracts an empty list", () => {
+    // The bundle cached before the strip kept them. Nothing downstream checks for undefined,
+    // so this is what stops an old cache blanking the raid map instead of the extract count.
+    const b = bundle();
+    delete b.maps.map1.extracts;
+    expect(denormalize(b).maps[0].extracts).toEqual([]);
   });
 });
 

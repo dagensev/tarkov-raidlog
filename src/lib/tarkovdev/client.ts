@@ -7,6 +7,7 @@ import {
 import type {
   RawCategory,
   RawDocument,
+  RawExtract,
   RawItem,
   RawItemsData,
   RawMap,
@@ -19,7 +20,15 @@ import type {
   TranslationDictionary,
 } from "./raw-types";
 import { foldedMapIds } from "./maps";
-import type { GameMap, ItemRef, NamedRef, TarkovData, Task, TaskObjective } from "./types";
+import type {
+  ExtractFaction,
+  GameMap,
+  ItemRef,
+  NamedRef,
+  TarkovData,
+  Task,
+  TaskObjective,
+} from "./types";
 
 /** Thrown when the API answers but the answer is not usable. */
 export class TarkovDevError extends Error {
@@ -111,8 +120,28 @@ export function fetchEndpoint<T>(
  * so it is stripped to per-map metadata before it is returned — and therefore before it
  * reaches the cache.
  */
+/**
+ * Bump whenever the stripped `CoreBundle` gains a field the app reads.
+ *
+ * Same reason as `SELL_INDEX_VERSION`: a bundle is kept a day, so without this a new field
+ * renders blank for up to 24 hours — present in the code, absent from every existing
+ * reader's cache, and indistinguishable from a bug. A mismatch makes the bundle count as
+ * behind, which is `bundleBehind` in the store.
+ *
+ * With one deliberate difference from the other two. Both catalogue halves also refuse to
+ * *serve* a copy of the wrong version (`useSellIndex`, `useEconomy`), because a blank flea
+ * row beats a wrong one. There is no matching gate here and there must not be: this bundle
+ * is the task list, and refusing it would blank the whole app for the length of a download.
+ * Readers of a new field tolerate its absence instead — `denormalize` writes
+ * `raw.extracts ?? []`, so an old cache yields a map with no exits and the count fills in
+ * a second later when the refetch lands.
+ */
+export const CORE_BUNDLE_VERSION = 1;
+
 export interface CoreBundle {
   mode: GameMode;
+  /** Shape of the stripped documents, against `CORE_BUNDLE_VERSION`. Absent on older caches. */
+  version?: number;
   tasks: Record<string, RawTask>;
   maps: Record<string, RawMap>;
   traders: Record<string, RawTrader>;
@@ -120,7 +149,17 @@ export interface CoreBundle {
   fetchedAt: number;
 }
 
-/** Drop spawns, extracts, locks, loot and hazards — the bulk of the 9.5 MB. */
+/**
+ * Drop spawns, locks, loot and hazards — the bulk of the 9.5 MB.
+ *
+ * Extracts are the one piece of geometry that survives, because there is no way to mark an
+ * exit on the raid map without them and the alternative is a second download of the same
+ * 8.7 MB document. 152 of them across 17 maps is roughly 60 KB of JSON, against a cached
+ * bundle already holding 491 whole tasks — under a percent either way.
+ *
+ * Kept raw rather than trimmed here: translating the name, normalising the faction and
+ * folding the switch need the translation dictionary, which only `denormalize` has.
+ */
 function stripMap(map: RawMap): RawMap {
   const {
     id,
@@ -133,6 +172,7 @@ function stripMap(map: RawMap): RawMap {
     enemies,
     raidDuration,
     players,
+    extracts,
   } = map;
   return {
     id,
@@ -145,6 +185,7 @@ function stripMap(map: RawMap): RawMap {
     enemies,
     raidDuration,
     players,
+    extracts,
   };
 }
 
@@ -177,6 +218,7 @@ export async function loadCoreBundle(
 
   return {
     mode,
+    version: CORE_BUNDLE_VERSION,
     tasks: collection<RawTask>(tasks.data, "tasks"),
     maps: strippedMaps,
     traders: collection<RawTrader>(traders.data, "traders"),
@@ -544,6 +586,40 @@ function makeResolver(bundle: CoreBundle) {
   return { t, mapRef, traderRef, taskRef };
 }
 
+/**
+ * `pmc`, `scav` or `shared`, defaulting to `shared`.
+ *
+ * 15 of 152 extracts publish no faction: Night Factory's 9 and Ground Zero 21+'s 6, both of
+ * which carry a `size` box where the others carry this. Both are maps where either side
+ * uses the same doors, so `shared` is the reading that claims least — and it draws the
+ * two-tone marker, which says "either of you" rather than promising one side a way out.
+ */
+function extractFaction(value: string | undefined): ExtractFaction {
+  return value === "pmc" || value === "scav" ? value : "shared";
+}
+
+/** One extract, translated and reduced to what the raid map draws. */
+function mapExtract(extract: RawExtract, t: (key: string, fallback?: string) => string) {
+  return {
+    id: extract.id,
+    // The maps document's own translations manifest lists `$.data.maps.*.extracts[*].name`,
+    // and `loadCoreBundle` already merges the whole `maps_en` dictionary into `bundle.text`
+    // for the map names — so this costs no second fetch and no second dictionary. A name
+    // with no entry falls back to itself, which is already readable often enough to be
+    // worth showing.
+    name: t(extract.name, extract.name),
+    nameId: extract.name,
+    faction: extractFaction(extract.faction),
+    position: extract.position,
+    outline: extract.outline ?? null,
+    // `switch`/`switches` are deliberately not carried. They look like the gate on an exit
+    // and are not — see the note on `RawExtract.switch`.
+    toll: extract.transferItem
+      ? { itemId: extract.transferItem.item, count: extract.transferItem.count }
+      : null,
+  };
+}
+
 function itemRef(id: string, items: ItemIndex | undefined): ItemRef {
   // Until the item index arrives, show something stable rather than an empty chip.
   return items?.[id] ?? { id, name: id, shortName: "key", iconLink: null, wikiLink: null };
@@ -636,6 +712,10 @@ export function denormalize(bundle: CoreBundle, items?: ItemIndex): TarkovData {
     players: raw.players ?? null,
     enemies: raw.enemies?.map((enemy) => t(enemy, enemy)) ?? null,
     description: raw.description ? t(raw.description, "") || null : null,
+    // `?? []` is the whole tolerance story for a bundle cached before `stripMap` kept
+    // extracts: an old cache yields a map with no exits rather than an undefined nobody
+    // downstream checks for. See `CORE_BUNDLE_VERSION`.
+    extracts: (raw.extracts ?? []).map((extract) => mapExtract(extract, t)),
   }));
 
   const traders = Object.values(bundle.traders).map((raw) => ({

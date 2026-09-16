@@ -7,9 +7,20 @@ import { ObjectiveMap } from '@/components/objective-map';
 import { ScreenshotBanner } from '@/components/screenshot-banner';
 import { TaskRow, rowStatus } from '@/components/task-row';
 import { EmptyNote, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { extractMarkers } from '@/lib/maps/extracts';
 import { objectivePins } from '@/lib/maps/pins';
 import { useAppStore } from '@/lib/store/app-store';
-import { useAvailability, useCurrentMap, useDetectedMap, useMaps, useMapsWithTasks, useRaidActive, useTaskStates, useTasks } from '@/lib/store/hooks';
+import {
+    useAvailability,
+    useCurrentMap,
+    useDetectedMap,
+    useMaps,
+    useMapsWithTasks,
+    useRaidActive,
+    useSellIndex,
+    useTaskStates,
+    useTasks,
+} from '@/lib/store/hooks';
 import { foldedMapIds, sceneLabel, taskIsOnMap } from '@/lib/tarkovdev/maps';
 import { map3d } from '@/lib/tarkovdev/maps-3d';
 
@@ -96,13 +107,28 @@ export default function RaidPage() {
     const render3d = map3d(map);
     const trail = useAppStore((s) => s.trail);
     const showPins = useAppStore((s) => s.settings.showObjectivePins);
+    const showExtracts = useAppStore((s) => s.settings.showExtracts);
     const update = useAppStore((s) => s.updateSettings);
+    const sellIndex = useSellIndex();
 
     /** Pins for the tasks you are holding here. Folding is what keeps Night Factory on Factory. */
     const pins = useMemo(() => {
         if (!map) return [];
         return objectivePins(holding, map.id, foldedMapIds(maps));
     }, [holding, map, maps]);
+
+    /**
+     * Every way out of here, with a toll named where the catalogue has arrived to name it.
+     *
+     * Resolved here rather than in the overlay so the overlay keeps taking everything it
+     * draws as a prop, and so it does not subscribe to a ~5,000-entry index that turns over
+     * hourly — that would re-render every marker on the map for a price none of them show.
+     */
+    const extracts = useMemo(() => {
+        if (!map) return [];
+        const itemName = (id: string) => sellIndex?.items[id]?.name ?? null;
+        return extractMarkers(maps, map.id, foldedMapIds(maps), itemName);
+    }, [map, maps, sellIndex]);
 
     if (!map) {
         return (
@@ -164,9 +190,12 @@ export default function RaidPage() {
                 key={map.id}
                 map={map}
                 pins={pins}
+                extracts={extracts}
                 trail={trail}
                 showPins={showPins}
                 onTogglePins={() => void update({ showObjectivePins: !showPins })}
+                showExtracts={showExtracts}
+                onToggleExtracts={() => void update({ showExtracts: !showExtracts })}
             />
 
             {keys.length > 0 ? (

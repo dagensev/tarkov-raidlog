@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ScreenshotPosition } from '@/lib/logs/screenshots';
 import type { MapCalibration, MapFloor } from '@/lib/maps/calibration';
+import type { ExtractMarker } from '@/lib/maps/extracts';
 import type { ObjectivePin } from '@/lib/maps/pins';
 import { project } from '@/lib/maps/project';
 import { FITTED, clampView, fitBox, wheelFactor, zoomAt, type Point, type Size, type View } from '@/lib/maps/viewport';
-import type { GameMap } from '@/lib/tarkovdev/types';
+import type { ExtractFaction, GameMap } from '@/lib/tarkovdev/types';
 import { uiScale } from '@/lib/ui-scale';
-import { cx } from './ui';
+import { Pill, cx } from './ui';
 
 /**
  * The raid map, full screen.
@@ -22,6 +23,47 @@ import { cx } from './ui';
  * That is what makes this cheap: one `transform` on that wrapper moves the SVG and every
  * marker together, with no per-marker arithmetic and no second coordinate system.
  */
+
+/** What the card and the aria-label call each faction. Never a colour swatch on its own. */
+const FACTION_LABEL: Record<ExtractFaction, string> = {
+    pmc: 'PMC',
+    scav: 'Scav',
+    shared: 'Either faction',
+};
+
+/**
+ * Literal class strings, never interpolated: Tailwind scans source text, so a
+ * `fill-${colour}/20` would compile to no CSS at all and the polygons would come out bare.
+ */
+/**
+ * Solid, not tinted.
+ *
+ * These first shipped at 60% fill with a same-colour border, on the reasoning that a marker
+ * competing with the drawing underneath is a marker in the way. It was the wrong trade: the
+ * drawings run from Customs' dark teal to Factory's mid grey, and a translucent mark takes
+ * its colour from whatever it lands on, so at the fitted scale — which is how the map is
+ * mostly read — half of them disappeared into the ground.
+ *
+ * So the fill is opaque and the edge is dark, which is the same answer the position arrow
+ * reached from the same problem (see its `stroke` comment below): a mark that carries its
+ * own border stops depending on what is underneath it. `border-ground` rather than a light
+ * outline because moss and steel are both lighter than every drawing, so the contrast that
+ * needs help is against the pale buildings, not the dark ground.
+ */
+const EXTRACT_STYLE: Record<ExtractFaction, { dot: string; poly: string }> = {
+    pmc: { dot: 'border-ground bg-moss', poly: 'fill-moss/25 stroke-moss' },
+    scav: { dot: 'border-ground bg-steel', poly: 'fill-steel/25 stroke-steel' },
+    // The two-tone fill is `.extract-shared` in globals.css, where the split does the work a
+    // border cannot — a border is one colour.
+    shared: { dot: 'extract-shared border-ground', poly: 'fill-bone-dim/20 stroke-bone-dim' },
+};
+
+/**
+ * Stable empties, so toggling a layer off does not mint a fresh array identity every
+ * render and re-run everything downstream of it.
+ */
+const NO_PINS: readonly ObjectivePin[] = [];
+const NO_EXTRACTS: readonly ExtractMarker[] = [];
 
 interface Prepared {
     svg: SVGSVGElement;
@@ -92,9 +134,12 @@ export function MapOverlay({
     floor,
     onFloor,
     pins,
+    extracts,
     trail,
     showPins,
     onTogglePins,
+    showExtracts,
+    onToggleExtracts,
     onClose,
 }: {
     map: GameMap;
@@ -104,10 +149,14 @@ export function MapOverlay({
     floor: MapFloor | null;
     onFloor: (floor: MapFloor | null) => void;
     pins: readonly ObjectivePin[];
+    /** Every way out, already named and folded. Tolls are named only once the catalogue lands. */
+    extracts: readonly ExtractMarker[];
     /** This raid's screenshots, oldest first. Empty on browsers with no File System Access. */
     trail: readonly ScreenshotPosition[];
     showPins: boolean;
     onTogglePins: () => void;
+    showExtracts: boolean;
+    onToggleExtracts: () => void;
     onClose: () => void;
 }) {
     const prepared = useMemo(() => {
@@ -241,9 +290,16 @@ export function MapOverlay({
     const [hoveredKey, setHoveredKey] = useState<string | null>(null);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-    const visible = showPins ? pins : [];
+    const visiblePins = showPins ? pins : NO_PINS;
+    const visibleExtracts = showExtracts ? extracts : NO_EXTRACTS;
     const shownKey = hoveredKey ?? selectedKey;
-    const shown = visible.find((pin) => pin.key === shownKey) ?? null;
+    // Two lists, one card. The key namespaces do not overlap — an extract's starts
+    // `extract:`, a pin's with a task id — so at most one of these can hit, and `kind`
+    // narrows the union for whichever did.
+    const shown: ObjectivePin | ExtractMarker | null =
+        visiblePins.find((pin) => pin.key === shownKey) ??
+        visibleExtracts.find((extract) => extract.key === shownKey) ??
+        null;
 
     // A ref callback keyed on `prepared`, not an effect: the holder only enters the tree
     // once the area has been measured, which is a render *after* `prepared` arrives, so an
@@ -333,10 +389,24 @@ export function MapOverlay({
                         <button
                             type='button'
                             onClick={onTogglePins}
+                            aria-pressed={showPins}
                             title={showPins ? 'Hide objective pins' : 'Show objective pins'}
                             className={cx(chip, showPins ? chipOn : chipOff)}
                         >
                             {pins.length} pins
+                        </button>
+                        {/*
+                          Amber when on, like every other chip in this row: the colour here means
+                          on or off. Tinting it moss would read as a PMC filter instead.
+                        */}
+                        <button
+                            type='button'
+                            onClick={onToggleExtracts}
+                            aria-pressed={showExtracts}
+                            title={showExtracts ? 'Hide extracts' : 'Show extracts'}
+                            className={cx(chip, showExtracts ? chipOn : chipOff)}
+                        >
+                            {extracts.length} extracts
                         </button>
                         <button
                             type='button'
@@ -408,7 +478,27 @@ export function MapOverlay({
                 positioning already is.
               */}
                             <svg viewBox='0 0 100 100' preserveAspectRatio='none' className='pointer-events-none absolute inset-0 size-full'>
-                                {visible.map((pin) => {
+                                {/* First, so an amber task zone drawn over an exit still reads. */}
+                                {visibleExtracts.map((extract) => {
+                                    if (!extract.outline || extract.outline.length < 3) return null;
+                                    const points = extract.outline.map((point) => project(calibration, point));
+                                    if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
+                                    return (
+                                        <polygon
+                                            key={extract.key}
+                                            points={points.map(({ u, v }) => `${u * 100},${v * 100}`).join(' ')}
+                                            className={EXTRACT_STYLE[extract.faction].poly}
+                                            // Thicker than the task zones' 0.3: an exit's
+                                            // footprint is often a doorway a few metres
+                                            // across, where a task zone is a yard or a
+                                            // building, so the same width draws a far
+                                            // fainter shape.
+                                            strokeWidth='0.5'
+                                        />
+                                    );
+                                })}
+
+                                {visiblePins.map((pin) => {
                                     if (pin.kind !== 'zone' || !pin.outline || pin.outline.length < 3) return null;
                                     const points = pin.outline.map((point) => project(calibration, point));
                                     if (points.some(({ u, v }) => u < 0 || u > 1 || v < 0 || v > 1)) return null;
@@ -438,7 +528,80 @@ export function MapOverlay({
                                 ) : null}
                             </svg>
 
-                            {visible.map((pin) => {
+                            {/*
+                              Before the pins, so a task pin sitting on top of an exit wins the
+                              pointer — the tasks are why the map is open. The event wiring below
+                              is the pin button's, copied rather than shared: every guard on it
+                              (the drag check, the `detail !== 0` check, clearing hover only when
+                              this marker still owns it) applies here for the same reasons, which
+                              are written out at length on the pin itself.
+                            */}
+                            {visibleExtracts.map((extract) => {
+                                const { u, v } = project(calibration, extract.position);
+                                if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+                                return (
+                                    <div
+                                        key={extract.key}
+                                        className='pointer-events-none absolute -translate-x-1/2 -translate-y-1/2'
+                                        style={{ left: `${u * 100}%`, top: `${v * 100}%`, scale: 1 / view.scale }}
+                                    >
+                                        <button
+                                            type='button'
+                                            onFocus={() => setHoveredKey(extract.key)}
+                                            onBlur={() => setHoveredKey((current) => (current === extract.key ? null : current))}
+                                            onPointerEnter={() => {
+                                                if (!drag.current) setHoveredKey(extract.key);
+                                            }}
+                                            onPointerLeave={() => setHoveredKey((current) => (current === extract.key ? null : current))}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                if (event.detail !== 0 && dragged.current) return;
+                                                setSelectedKey((current) => (current === extract.key ? null : extract.key));
+                                            }}
+                                            // The whole marker vocabulary is colour, which is the one
+                                            // thing a screen reader does not get — and moss against
+                                            // steel at this size is a real problem for a deuteranope
+                                            // besides. Everything the card says, said again in words.
+                                            aria-label={[
+                                                `${extract.name} extract`,
+                                                FACTION_LABEL[extract.faction],
+                                                extract.onlyOn ? `${extract.onlyOn} only` : null,
+                                                extract.toll
+                                                    ? `toll ${extract.toll.count.toLocaleString('en-US')} ${extract.toll.name ?? 'items'}`
+                                                    : null,
+                                                ...extract.conditions.map((condition) => condition.label),
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' — ')}
+                                            className={cx(
+                                                // `rotate-45` is safe where a second `scale` would not be:
+                                                // Tailwind compiles it to the `rotate` property, so it
+                                                // composes with the wrapper's counter-scale and the
+                                                // `hover:scale-150` below instead of overriding either.
+                                                // The wrapper stays 12×12 in layout — a transform does not
+                                                // resize a box — so the diamond is still centred on the
+                                                // point despite its wider diagonal.
+                                                //
+                                                // Bigger than the 10px task zones rather than smaller. A
+                                                // rotated square loses about a third of its area to the
+                                                // corners a circle of the same box keeps, so matching the
+                                                // number would read as the smaller mark; and there are
+                                                // ten to twenty exits against a handful of held tasks, so
+                                                // this is the layer being scanned rather than the one
+                                                // being read one pin at a time.
+                                                'pointer-events-auto block size-[12px] cursor-pointer border transition-transform hover:scale-150',
+                                                'rotate-45',
+                                                EXTRACT_STYLE[extract.faction].dot,
+                                                // Bone rather than amber: an amber ring on a moss diamond
+                                                // fights the faction colour the marker exists to carry.
+                                                extract.key === shownKey && 'ring-2 ring-bone',
+                                            )}
+                                        />
+                                    </div>
+                                );
+                            })}
+
+                            {visiblePins.map((pin) => {
                                 const { u, v } = project(calibration, pin.position);
                                 if (u < 0 || u > 1 || v < 0 || v > 1) return null;
                                 // The counter-scale and the hover grow cannot live on the same element.
@@ -618,39 +781,111 @@ export function MapOverlay({
                         onDoubleClick={(event) => event.stopPropagation()}
                         className='absolute bottom-4 left-4 max-w-[min(360px,calc(100%-2rem))] border border-line-bright bg-panel/95 p-3'
                     >
-                        <p className='stencil text-[11px] text-amber'>{shown.taskName}</p>
-                        <p className='mt-1.5 text-[12px] leading-relaxed text-bone-dim'>{shown.description}</p>
-                        {shown.key === selectedKey ? (
-                            // Only when the card is showing the pin you clicked, not merely one you are
-                            // hovering. Testing `hoveredKey === null` instead would hide the link right
-                            // after the click that should reveal it: the mouse (or, for a keyboard
-                            // activation, focus) is still on the clicked pin, so `hoveredKey` is still
-                            // set even though the card is showing the selection.
-                            <button
-                                type='button'
-                                onClick={() => {
-                                    const id = `task-${shown.taskId}`;
-                                    onClose();
-                                    // A zero timeout, not a frame: this only needs to run after React commits
-                                    // the close, so the scroll lock is off and the row is somewhere a smooth
-                                    // scroll can actually take you. A `requestAnimationFrame` callback is the
-                                    // one timer a page that is not currently being painted can starve, and a
-                                    // macrotask still runs after the commit either way.
-                                    setTimeout(() => {
-                                        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }, 0);
-                                }}
-                                className='stencil mt-2.5 cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber'
-                            >
-                                Go to task →
-                            </button>
-                        ) : null}
+                        {shown.kind === 'extract' ? (
+                            <>
+                                <p className='stencil text-[11px] text-amber'>{shown.name}</p>
+                                <div className='mt-1.5 flex flex-wrap items-center gap-2'>
+                                    {/*
+                                      The faction in words as well as in colour. The marker itself is
+                                      a 9px coloured diamond, which is the whole signal — moss against
+                                      steel at that size is not a distinction everyone can make.
+                                    */}
+                                    <Pill tone={shown.faction === 'pmc' ? 'moss' : shown.faction === 'scav' ? 'steel' : 'muted'}>
+                                        {FACTION_LABEL[shown.faction]}
+                                    </Pill>
+                                    {shown.onlyOn ? <Pill tone='muted'>{shown.onlyOn} only</Pill> : null}
+                                    {shown.conditions.map((condition) => (
+                                        <Pill key={condition.label} tone='rust'>
+                                            {condition.label}
+                                        </Pill>
+                                    ))}
+                                </div>
+                {/*
+                                  Spelled out under the pills rather than left as the pill alone:
+                                  "red rebel + paracord" does not say whether they are taken, and
+                                  finding that out by failing the extract costs a raid.
+                                  `MapLauncher`'s feature list, down to the colours — the same kind
+                                  of thing said the same way.
+                                */}
+                                {shown.conditions.length > 0 ? (
+                                    <ul className='mt-2 space-y-1'>
+                                        {shown.conditions.map((condition) => (
+                                            <li
+                                                key={condition.label}
+                                                className='flex gap-2 text-[11px] leading-relaxed text-bone-dim'
+                                            >
+                                                <span aria-hidden className='text-amber-dim'>
+                                                    ▸
+                                                </span>
+                                                {condition.detail}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : null}
+                                {shown.toll ? (
+                                    // The item name arrives with the 16.7 MB catalogue, long after the
+                                    // map is usable. Until it does, the count is still the thing worth
+                                    // knowing — you cannot leave this way without it — so the row shows
+                                    // anyway and keeps the id where someone debugging can reach it.
+                                    <p
+                                        className='data mt-2 text-[11px] text-bone-dim'
+                                        title={shown.toll.name ? undefined : shown.toll.itemId}
+                                    >
+                                        Toll · ×{shown.toll.count.toLocaleString('en-US')}
+                                        {shown.toll.name ? ` ${shown.toll.name}` : ''}
+                                    </p>
+                                ) : null}
+                            </>
+                        ) : (
+                            <>
+                                <p className='stencil text-[11px] text-amber'>{shown.taskName}</p>
+                                <p className='mt-1.5 text-[12px] leading-relaxed text-bone-dim'>{shown.description}</p>
+                                {shown.key === selectedKey ? (
+                                    // Only when the card is showing the pin you clicked, not merely one you
+                                    // are hovering. Testing `hoveredKey === null` instead would hide the link
+                                    // right after the click that should reveal it: the mouse (or, for a
+                                    // keyboard activation, focus) is still on the clicked pin, so
+                                    // `hoveredKey` is still set even though the card is showing the selection.
+                                    <button
+                                        type='button'
+                                        onClick={() => {
+                                            const id = `task-${shown.taskId}`;
+                                            onClose();
+                                            // A zero timeout, not a frame: this only needs to run after React
+                                            // commits the close, so the scroll lock is off and the row is
+                                            // somewhere a smooth scroll can actually take you. A
+                                            // `requestAnimationFrame` callback is the one timer a page that is
+                                            // not currently being painted can starve, and a macrotask still
+                                            // runs after the commit either way.
+                                            setTimeout(() => {
+                                                document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                            }, 0);
+                                        }}
+                                        className='stencil mt-2.5 cursor-pointer border border-line-bright px-2 py-1 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber'
+                                    >
+                                        Go to task →
+                                    </button>
+                                ) : null}
+                            </>
+                        )}
                     </div>
                 ) : null}
             </div>
 
             <p className='data shrink-0 border-t border-line bg-panel/70 px-4 py-2 text-[10px] text-muted'>
-                Drag to pan · scroll to zoom · double-click to zoom in · click a pin for the task. Drawn by{' '}
+                Drag to pan · scroll to zoom · double-click to zoom in · click a pin for the task, an extract for what it asks of you. Extracts:{' '}
+                {/*
+                  A legend, because three colours with nothing naming them is a code rather than a
+                  signal. The swatches are hidden from the accessibility tree with the word left
+                  beside them, so this reads as "PMC Scav either" rather than as three unlabelled
+                  graphics.
+                */}
+                <span className='inline-flex items-center gap-1 align-middle'>
+                    <span aria-hidden className='inline-block size-[7px] rotate-45 bg-moss' /> PMC
+                    <span aria-hidden className='ml-2 inline-block size-[7px] rotate-45 bg-steel' /> Scav
+                    <span aria-hidden className='extract-shared ml-2 inline-block size-[7px] rotate-45' /> either
+                </span>
+                . Drawn by{' '}
                 <a
                     href='https://github.com/the-hideout/tarkov-dev-svg-maps/'
                     target='_blank'

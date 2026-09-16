@@ -120,6 +120,41 @@ export interface Task {
   restartable?: boolean;
 }
 
+/** Who an exit is open to. `shared` also stands in for "not published" — see `extractFaction`. */
+export type ExtractFaction = "pmc" | "scav" | "shared";
+
+/** What an exit takes to let you through. */
+export interface ExtractToll {
+  itemId: string;
+  count: number;
+}
+
+/**
+ * A way out of a map, translated and reduced to what the raid map draws.
+ *
+ * `top`/`bottom` are published and deliberately not carried: nothing filters markers by
+ * floor — task pins do not either — and half the markers vanishing on a floor switch is a
+ * worse answer than a marker for the exit one storey down.
+ */
+export interface MapExtract {
+  id: string;
+  /** Readable, e.g. "Old Gas Station Gate". */
+  name: string;
+  /**
+   * The untranslated name, e.g. `Alpinist` for "Cliff Descent".
+   *
+   * Kept because it is the only thing the game's own configuration and tarkov.dev call the
+   * same — it is what `extract-requirements.ts` joins on. Translated names cannot do that
+   * job, since either side is free to reword one.
+   */
+  nameId: string;
+  faction: ExtractFaction;
+  position: GamePosition;
+  /** Footprint polygon. Every published extract has one, but the type does not promise it. */
+  outline: GamePosition[] | null;
+  toll: ExtractToll | null;
+}
+
 export interface GameMap {
   id: string;
   name: string;
@@ -134,6 +169,14 @@ export interface GameMap {
   players: string | null;
   enemies: string[] | null;
   description: string | null;
+  /**
+   * Every way out of it.
+   *
+   * Never optional, so no reader needs a null check: `denormalize` writes `?? []`, which is
+   * what lets a bundle cached before extracts were kept render a map with no exits rather
+   * than crash. See `CORE_BUNDLE_VERSION`.
+   */
+  extracts: MapExtract[];
 }
 
 export interface TraderLevel {

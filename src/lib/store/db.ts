@@ -50,6 +50,14 @@ export interface Settings {
   pollIntervalMs: number;
   /** Whether objective pins are drawn on the raid map. */
   showObjectivePins: boolean;
+  /**
+   * Whether extract markers are drawn on the raid map.
+   *
+   * Its own flag rather than riding on `showObjectivePins`: the two answer different
+   * questions — what am I here to do, and how do I leave — and wanting one without the
+   * other is the common case rather than the odd one.
+   */
+  showExtracts: boolean;
 
   // --- character skills -------------------------------------------------------------
   // Neither is in the logs and neither is in tarkov.dev's data, so both are typed by
@@ -104,6 +112,7 @@ export const DEFAULT_SETTINGS: Settings = {
   gameMode: null,
   pollIntervalMs: 2000,
   showObjectivePins: true,
+  showExtracts: true,
   craftingSkill: 0,
   hideoutManagement: 0,
   // Markets only. Barter and craft routes are opt-in: they rewrite most rows into chains,

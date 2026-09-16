@@ -120,6 +120,20 @@ body::after {
     border-right: 1px solid;
   }
 
+  /*
+   * An extract open to both factions, drawn as one marker rather than two.
+   *
+   * The square this lands on carries `rotate-45`, so a left/right split in its own frame
+   * comes out as a diagonal split of the diamond on screen — which reads at this size, where
+   * a two-colour outline does not.
+   *
+   * Opaque, like the single-faction markers it has to sit beside: see `EXTRACT_STYLE` for
+   * why none of them are tinted.
+   */
+  .extract-shared {
+    background-image: linear-gradient(to right, var(--color-moss) 50%, var(--color-steel) 50%);
+  }
+
   /* Tick strip used under headers, like a ruler edge. */
   .ticks {
     background-image: repeating-linear-gradient(

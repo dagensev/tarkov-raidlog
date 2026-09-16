@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { ScreenshotPosition } from '@/lib/logs/screenshots';
 import { calibrationFor, type MapFloor } from '@/lib/maps/calibration';
+import type { ExtractMarker } from '@/lib/maps/extracts';
 import type { ObjectivePin } from '@/lib/maps/pins';
 import { floorFor } from '@/lib/maps/project';
 import type { GameMap } from '@/lib/tarkovdev/types';
@@ -25,16 +26,22 @@ import { MapOverlay } from './map-overlay';
 export function ObjectiveMap({
     map,
     pins,
+    extracts,
     trail,
     showPins,
     onTogglePins,
+    showExtracts,
+    onToggleExtracts,
 }: {
     map: GameMap;
     pins: readonly ObjectivePin[];
+    extracts: readonly ExtractMarker[];
     /** This raid's screenshots, oldest first. Empty on browsers with no File System Access. */
     trail: readonly ScreenshotPosition[];
     showPins: boolean;
     onTogglePins: () => void;
+    showExtracts: boolean;
+    onToggleExtracts: () => void;
 }) {
     const calibration = calibrationFor(map);
     const [open, setOpen] = useState(false);
@@ -86,14 +93,16 @@ export function ObjectiveMap({
         <>
             <MapLauncher
                 label='Raid map'
-                tags={['position tracker', 'task pins']}
+                tags={['position tracker', 'task pins', 'extracts']}
                 features={[
                     'Displays your position and the route you have walked, when you take an in-raid screenshot',
                     `Pins active task locations`,
-                    'Click a pin to read the task',
+                    'Marks every extract, coloured by faction, and what it charges to let you through',
+                    'Click a pin or an extract to read it',
                 ]}
                 hints={[
                     `${pins.length} pin${pins.length === 1 ? '' : 's'}`,
+                    `${extracts.length} extract${extracts.length === 1 ? '' : 's'}`,
                     'drag to pan',
                     'scroll to zoom',
                     'esc to close',
@@ -110,9 +119,12 @@ export function ObjectiveMap({
                     floor={floor}
                     onFloor={(next) => setManualFloor({ floor: next, againstShot: newestShot?.name ?? null })}
                     pins={pins}
+                    extracts={extracts}
                     trail={trail}
                     showPins={showPins}
                     onTogglePins={onTogglePins}
+                    showExtracts={showExtracts}
+                    onToggleExtracts={onToggleExtracts}
                     onClose={close}
                 />
             ) : null}

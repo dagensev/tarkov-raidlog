@@ -18,6 +18,7 @@ import {
 import { LogWatcher, type ScanProgress } from "@/lib/logs/watcher";
 import { analyzeWipes, type WipeAnalysis } from "@/lib/logs/wipe";
 import {
+  CORE_BUNDLE_VERSION,
   denormalize,
   loadCoreBundle,
   loadItemCatalogue,
@@ -376,11 +377,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshData(force = false) {
     const state = get();
     const mode = resolveGameMode(state);
-    const bundleFresh = Boolean(
-      state.bundle && state.bundle.mode === mode && !isStale(state.bundle),
-    );
 
-    if (!bundleFresh || force) {
+    if (bundleBehind(state, mode) || force) {
       if (state.dataLoading) return;
       set({ dataLoading: true, dataError: null });
       try {
@@ -485,6 +483,21 @@ function resolveGameMode(state: Pick<AppState, "settings" | "sessionMode">): Gam
  * own: neither is worth surfacing as a failure, since the task list is already on screen
  * and both degrade to something usable.
  */
+/**
+ * Whether the task, map and trader documents are missing, a day old, from another mode, or
+ * of an older shape than the app now reads.
+ *
+ * Unlike the two below, nothing refuses to *serve* a bundle that fails this — see
+ * `CORE_BUNDLE_VERSION`. It only decides whether to go and fetch again.
+ */
+export function bundleBehind(state: Pick<AppState, "bundle">, mode: GameMode): boolean {
+  return (
+    state.bundle?.mode !== mode ||
+    state.bundle?.version !== CORE_BUNDLE_VERSION ||
+    isStale(state.bundle ?? undefined)
+  );
+}
+
 /**
  * Whether the hideout, barter and craft lists are missing, a day old, from another mode,
  * or of an older shape than the page now reads.

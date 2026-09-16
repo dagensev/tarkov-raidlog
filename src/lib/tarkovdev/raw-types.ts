@@ -148,6 +148,48 @@ export interface RawTasksData {
   achievements?: Record<string, unknown>;
 }
 
+/**
+ * A way out of a map.
+ *
+ * Checked against live data across 17 maps (152 extracts): `id`, `name`, `switch`,
+ * `switches`, `position`, `outline`, `top` and `bottom` are on every one. `faction` is on
+ * 137 — absent on Night Factory's 9 and Ground Zero 21+'s 6, which carry a `size` box
+ * where the others carry it. `transferItem` is on 20, e.g. Dorms V-Ex, which asks 20,000
+ * roubles to let you through.
+ */
+export interface RawExtract {
+  id: string;
+  /**
+   * Translation key, resolved against the same `maps_en` dictionary the map names use.
+   * Sometimes already readable and still a key — `"Old Azs Gate"` resolves to "Old Gas
+   * Station Gate" — so it has to go through the dictionary either way.
+   */
+  name: string;
+  /** `pmc`, `scav` or `shared`. Absent on two maps; see `extractFaction` in the client. */
+  faction?: string;
+  /**
+   * Looks like "the switch that opens this exit" and is not. Measured across all 13 maps
+   * that publish extracts: every extract on a map carries the *same* value as its siblings,
+   * and on the five maps with no switches at all it is the string `"false"` — which
+   * `Boolean()` reads as true, so anything derived from it marks every exit on the map.
+   * Where a map does have switches it is one of their ids copied onto every entry, even on
+   * Interchange, which has six.
+   *
+   * So nothing here can say which exits are gated. Declared only so the next person reads
+   * this before reaching for it again.
+   */
+  switch?: string;
+  switches?: string[];
+  position: GamePosition;
+  outline?: GamePosition[];
+  /** Height band. Not carried downstream — nothing filters markers by floor, pins included. */
+  top?: number;
+  bottom?: number;
+  size?: GamePosition;
+  /** The toll: an item id and how many of it are taken. */
+  transferItem?: { item: string; count: number };
+}
+
 export interface RawMap {
   id: string;
   /** Translation key, e.g. `"56f40101d2720b2a4d8b45d6 Name"` — note the capital N. */
@@ -164,6 +206,8 @@ export interface RawMap {
   players: string | null;
   minPlayerLevel?: number;
   maxPlayerLevel?: number;
+  /** Every way out. Kept through `stripMap`; see the comment there for why it is the exception. */
+  extracts?: RawExtract[];
 }
 
 export interface RawMapsData {
