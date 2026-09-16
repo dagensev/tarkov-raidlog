@@ -1,15 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { TaskRow } from '@/components/task-row';
-import { Button, EmptyNote, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
-import { useAppStore } from '@/lib/store/app-store';
-import { useAvailability, useCurrentMap, useMaps, useMapsWithTasks, useTaskStates, useTasks } from '@/lib/store/hooks';
+import { Button, Label, Lamp, Panel, PanelHeader, Pill, cx } from '@/components/ui';
+import { useMaps } from '@/lib/store/hooks';
 import { useSquadStore } from '@/lib/store/squad-store';
-import { taskIsOnMap } from '@/lib/tarkovdev/maps';
-import { mapFilterFrom, resolveMapFilter } from '@/lib/tasks/map-filter';
-import { mapOptions } from '@/lib/tasks/map-options';
 
 function StatusLamp() {
     const status = useSquadStore((s) => s.status);
@@ -144,89 +139,6 @@ function InvitePanel() {
     );
 }
 
-/** Tasks more than one of you still needs — the reason to run together. */
-function SharedTasks() {
-    const members = useSquadStore((s) => s.members);
-    const progress = useSquadStore((s) => s.progress);
-    const tasks = useTasks();
-    const states = useTaskStates();
-    const availability = useAvailability();
-    const maps = useMapsWithTasks();
-    const currentMap = useCurrentMap();
-    // Shared with the tasks tab. Nothing picked still means "follow the detected map" here;
-    // picking anything, including Any map, sticks — and travels with you to the other tab.
-    const mapFilter = useAppStore((s) => s.mapFilter);
-    const setMapFilter = useAppStore((s) => s.setMapFilter);
-    const mapId = resolveMapFilter(mapFilter, currentMap?.id);
-
-    /** Everything the squad is doubled up on, before the dropdown narrows it to one map. */
-    const sharedAnywhere = useMemo(() => {
-        if (members.length < 2) return [];
-        return tasks
-            .map((task) => ({ task, holding: members.filter((m) => progress[m.id]?.[task.id] === 'started') }))
-            .filter(({ holding }) => holding.length >= 2)
-            .sort((a, b) => b.holding.length - a.holding.length || a.task.name.localeCompare(b.task.name));
-    }, [members, progress, tasks]);
-
-    /**
-     * Maps with something shared on them, counted — the same read the task list gives you,
-     * so the dropdown says where the squad has work rather than listing every map blindly.
-     */
-    // The detected map is kept listed even at zero, since it was selected for you.
-    const options = useMemo(
-        () => mapOptions(maps, sharedAnywhere.map(({ task }) => task), mapId),
-        [maps, sharedAnywhere, mapId],
-    );
-
-    const shared = useMemo(
-        () => (mapId ? sharedAnywhere.filter(({ task }) => taskIsOnMap(task, mapId)) : sharedAnywhere),
-        [sharedAnywhere, mapId],
-    );
-
-    if (members.length < 2) {
-        return (
-            <Panel className='rise' style={{ animationDelay: '60ms' }}>
-                <PanelHeader title='Shared tasks' meta='waiting for squadmates' />
-                <EmptyNote>Send someone your invite link. Once two of you are in, this shows the tasks you are both holding.</EmptyNote>
-            </Panel>
-        );
-    }
-
-    return (
-        <Panel className='rise' style={{ animationDelay: '60ms' }}>
-            <PanelHeader
-                title='Both holding'
-                meta={`${shared.length} tasks`}
-                action={
-                    <select
-                        value={mapId}
-                        onChange={(e) => setMapFilter(mapFilterFrom(e.target.value))}
-                        className='data border border-line-bright bg-ground-2 px-2 py-1 text-[11px] text-bone focus:border-amber-dim focus:outline-none'
-                    >
-                        <option value=''>Any map ({sharedAnywhere.length})</option>
-                        {options.map(({ map, count }) => (
-                            <option key={map.id} value={map.id}>
-                                {map.name} ({count})
-                            </option>
-                        ))}
-                    </select>
-                }
-            />
-            {shared.length === 0 ? (
-                <EmptyNote>Nothing your squad is working on together{mapId ? ' on this map' : ''} right now.</EmptyNote>
-            ) : (
-                // The same row the task list uses, so objectives, keys and the wiki link are all
-                // here. Who else is holding it comes from the squad tag inside the row.
-                <ul>
-                    {shared.map(({ task }) => (
-                        <TaskRow key={task.id} task={task} state={states.get(task.id)} availability={availability.get(task.id)} mapId={mapId || undefined} />
-                    ))}
-                </ul>
-            )}
-        </Panel>
-    );
-}
-
 function Members() {
     const members = useSquadStore((s) => s.members);
     const identity = useSquadStore((s) => s.identity);
@@ -235,7 +147,7 @@ function Members() {
     if (members.length === 0) return null;
 
     return (
-        <Panel className='rise' style={{ animationDelay: '120ms' }}>
+        <Panel className='rise' style={{ animationDelay: '60ms' }}>
             <PanelHeader title='Members' meta={`${members.length}`} />
             <ul className='divide-y divide-line'>
                 {members.map((member) => {
@@ -265,7 +177,6 @@ export default function SquadPage() {
     return (
         <div className='space-y-4'>
             <InvitePanel />
-            <SharedTasks />
             <Members />
         </div>
     );

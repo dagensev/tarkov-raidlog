@@ -16,6 +16,8 @@ export interface SortInputs {
   states: ReadonlyMap<string, TaskState>;
   /** Squadmates — you excluded — also holding each task, by task id. */
   squadHolders: ReadonlyMap<string, number>;
+  /** The map the list is filtered to, when one is. Tasks handed out for it lead every mode. */
+  mapId?: string;
 }
 
 export const SORT_MODES: ReadonlyArray<{ id: SortMode; label: string; title: string }> = [
@@ -62,6 +64,20 @@ const COMPARE: Record<SortMode, (a: Task, b: Task, inputs: SortInputs) => number
   name: () => 0,
 };
 
+/**
+ * Tasks *assigned* to the filtered map, above the ones that merely touch it.
+ *
+ * `taskIsOnMap` is deliberately wide — it keeps a task assigned elsewhere that has one
+ * objective here, or whose key is found here — so filtering to Customs answers with more
+ * than the Customs tasks. Ranking the assigned ones first puts what the trader sent you
+ * here for at the top without dropping the rest off the list.
+ *
+ * Above the mode's own ordering rather than below it: the filter is the stronger
+ * statement of intent, and a held task on another map is still a task for another map.
+ */
+const byFilteredMap = (a: Task, b: Task, mapId: string): number =>
+  Number(b.map?.id === mapId) - Number(a.map?.id === mapId);
+
 /** A sorted copy. Every mode falls through to the name so the order never jitters. */
 export function sortTasks(
   tasks: readonly Task[],
@@ -69,5 +85,11 @@ export function sortTasks(
   inputs: SortInputs,
 ): Task[] {
   const compare = COMPARE[mode];
-  return [...tasks].sort((a, b) => compare(a, b, inputs) || a.name.localeCompare(b.name));
+  const { mapId } = inputs;
+  return [...tasks].sort(
+    (a, b) =>
+      (mapId ? byFilteredMap(a, b, mapId) : 0) ||
+      compare(a, b, inputs) ||
+      a.name.localeCompare(b.name),
+  );
 }

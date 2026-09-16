@@ -70,6 +70,11 @@ export interface TaskView {
   query: string;
   kappaOnly: boolean;
   sort: SortMode;
+  /**
+   * Squad members whose logs the list reads, by member id. Empty means yours alone, as if
+   * you were solo — so joining a squad never silently changes what the page opens on.
+   */
+  members: string[];
 }
 
 interface AppState {
@@ -256,7 +261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   screenshotError: null,
   trail: [],
   mapFilter: null,
-  taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress" },
+  taskView: { filter: "started", query: "", kappaOnly: false, sort: "progress", members: [] },
   sellView: DEFAULT_SELL_VIEW,
   craftView: DEFAULT_CRAFT_VIEW,
 

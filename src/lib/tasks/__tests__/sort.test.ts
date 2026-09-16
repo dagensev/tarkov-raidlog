@@ -28,12 +28,16 @@ const trader = (name: string) => ({ id: name, name });
 const inputs = (
   states: Record<string, TaskState["status"]> = {},
   squadHolders: Record<string, number> = {},
+  mapId?: string,
 ): SortInputs => ({
   states: new Map(
     Object.entries(states).map(([id, status]) => [id, { status } as TaskState]),
   ),
   squadHolders: new Map(Object.entries(squadHolders)),
+  mapId,
 });
+
+const map = (id: string) => ({ id, name: id });
 
 const order = (list: readonly Task[]) => list.map((t) => t.id);
 
@@ -145,6 +149,43 @@ describe("sortTasks", () => {
       task("c", { trader: trader("Mechanic") }),
     ];
     expect(order(sortTasks(list, "trader", inputs()))).toEqual(["c", "a", "b"]);
+  });
+
+  describe("filtered to a map", () => {
+    it("leads with the tasks handed out for that map", () => {
+      // The filter keeps tasks that merely have an objective or a key there, so the ones
+      // actually assigned to the map have to be lifted above them.
+      const list = [task("elsewhere", { map: map("woods") }), task("here", { map: map("customs") })];
+      expect(order(sortTasks(list, "name", inputs({}, {}, "customs")))).toEqual(["here", "elsewhere"]);
+    });
+
+    it("outranks the mode's own ordering", () => {
+      // A held task on another map is still a task for another map.
+      const list = [task("held", { map: map("woods") }), task("cold", { map: map("customs") })];
+      const withMap = inputs({ held: "started" }, {}, "customs");
+      expect(order(sortTasks(list, "progress", withMap))).toEqual(["cold", "held"]);
+      expect(order(sortTasks(list, "progress", inputs({ held: "started" })))).toEqual(["held", "cold"]);
+    });
+
+    it("orders within each block by the chosen mode", () => {
+      const list = [
+        task("a-here", { map: map("customs"), trader: trader("Therapist") }),
+        task("b-here", { map: map("customs"), trader: trader("Prapor") }),
+        task("c-away", { map: map("woods"), trader: trader("Therapist") }),
+        task("d-away", { map: map("woods"), trader: trader("Prapor") }),
+      ];
+      expect(order(sortTasks(list, "trader", inputs({}, {}, "customs")))).toEqual([
+        "b-here",
+        "a-here",
+        "d-away",
+        "c-away",
+      ]);
+    });
+
+    it("changes nothing when no map is picked", () => {
+      const list = [task("b", { map: map("customs") }), task("a", { map: map("woods") })];
+      expect(order(sortTasks(list, "name", inputs()))).toEqual(["a", "b"]);
+    });
   });
 
   it("breaks every tie by name, so the list never jitters", () => {
