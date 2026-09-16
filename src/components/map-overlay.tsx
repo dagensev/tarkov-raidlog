@@ -528,7 +528,68 @@ export function MapOverlay({
                                         className='absolute -translate-x-1/2 -translate-y-1/2 text-[16px] leading-none text-rust'
                                         aria-label='You are here'
                                     >
-                                        {shot.yaw === null ? '●' : '▲'}
+                                        {shot.yaw === null ? (
+                                            '●'
+                                        ) : (
+                                            /*
+                        A plain ▲ is symmetric enough that which end is the front has to be
+                        guessed against the trail behind it. Drawn instead as a dart with a
+                        black nose: the notch at the back and the dark tip each say which way
+                        you face on their own. 20px rather than the 16 the glyph used — at 16
+                        the nose is about two pixels and reads as an artefact.
+                      */
+                                            <svg
+                                                // 20px over a 20-unit box, with the root `zoom` of 1.25
+                                                // on top, puts one unit at 1.25 device pixels on an
+                                                // ordinary display. The size is not free to be anything:
+                                                // the outline below has to come out a whole number of
+                                                // pixels wide, and the stroke width is derived from
+                                                // whatever this factor turns out to be.
+                                                viewBox='0 0 20 20'
+                                                className='block size-[20px] overflow-visible'
+                                                shapeRendering='geometricPrecision'
+                                                aria-hidden
+                                            >
+                                                {/*
+                            The outline is not decoration. Half these maps are dark enough
+                            that a black nose reads as a hole rather than a tip, and the
+                            light maps do the same to the rust body, so the dart carries its
+                            own edge and stops depending on what is underneath it.
+
+                            `paint-order: stroke fill` is what keeps that edge clean. A
+                            centred stroke straddles the outline — its inner half lands on
+                            top of the fill's own antialiased edge, and the two blend into a
+                            visibly ragged seam. Painting the stroke first puts the fill over
+                            that inner half, so the join is one hard edge.
+
+                            Only that outer half shows, so the width is doubled to 3.2 units
+                            — 1.6 visible, times the 1.25 device pixels a unit is worth, is
+                            two whole pixels. Two is the floor worth having: the marker is
+                            nearly always rotated off-axis, and a band narrower than a whole
+                            pixel stair-steps along the diagonal because it cannot decide
+                            between one pixel and two. That, rather than antialiasing, is
+                            what reads as pixelation at this size, and it is why the width
+                            has to be re-derived whenever the 20px above changes.
+                          */}
+                                                <polygon
+                                                    points='10,1 18,19 10,14.5 2,19'
+                                                    fill='currentColor'
+                                                    stroke='var(--color-bone)'
+                                                    strokeWidth='3.2'
+                                                    strokeLinejoin='round'
+                                                    paintOrder='stroke fill'
+                                                />
+                                                {/*
+                            The nose, held a fraction inside the body rather than sharing its
+                            edges. Flush, the black and the rust each draw their own
+                            antialiased boundary along the same diagonal and the stack of the
+                            two is the same ragged line the stroke used to make; inset, the
+                            black edge falls on solid rust and a hairline of body shows
+                            around it.
+                          */}
+                                                <polygon points='10,1.6 12.85,8.2 7.15,8.2' fill='#000' />
+                                            </svg>
+                                        )}
                                     </span>
                                 );
                             })}
