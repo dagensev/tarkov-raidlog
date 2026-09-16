@@ -13,9 +13,9 @@ import { Lamp, cx } from './ui';
 const NAV = [
     { href: '/', label: 'Tasks' },
     { href: '/raid/', label: 'Raid' },
-    { href: '/squad/', label: 'Squad' },
     { href: '/flea/', label: 'Flea market' },
     { href: '/calculators/', label: 'Calculators' },
+    { href: '/squad/', label: 'Squad' },
     { href: '/settings/', label: 'Settings' },
 ] as const;
 

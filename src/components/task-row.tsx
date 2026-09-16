@@ -235,16 +235,6 @@ export function TaskRow({
 
       <div className="flex shrink-0 items-center gap-2 py-2.5 pr-3">
         <Pill tone={style.tone}>{style.label}</Pill>
-
-        {/* Completion comes from the logs alone — there is nothing here to click. */}
-        {isDone ? (
-          <span
-            title="Completed in your logs"
-            className="grid size-6 place-items-center border border-moss/40 bg-moss/10 text-[11px] text-moss"
-          >
-            ✓
-          </span>
-        ) : null}
       </div>
     </li>
   );
